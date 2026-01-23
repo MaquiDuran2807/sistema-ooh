@@ -1,0 +1,67 @@
+# Dependencias
+node_modules/
+package-lock.json
+yarn.lock
+
+# Archivos de entorno (NUNCA subir credenciales)
+.env
+.env.local
+.env.*.local
+ooh-key.json
+gcp-key.json
+aws-credentials.json
+
+# Base de datos SQLite
+*.db
+ooh_data.db
+ooh_data.test.db
+
+# Archivos de datos locales
+ooh_data.xlsx
+*.xlsx
+ooh_data.csv
+brands.csv
+campaigns.csv
+ooh_records.csv
+ooh_types.csv
+
+# Imágenes locales (muy pesadas para git)
+backend/local-images/
+
+# Build outputs
+build/
+dist/
+.parcel-cache/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.iml
+
+# Testing
+coverage/
+.nyc_output/
+
+# Heroku
+Procfile.local
+vendor/
+
+# Misc
+.cache/
+temp/

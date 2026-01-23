@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.local
+ooh_data.xlsx
+*.xlsx
+dist/
+build/

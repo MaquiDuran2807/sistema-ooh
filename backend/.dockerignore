@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+ooh-key.json
+*.xlsx
+.DS_Store
