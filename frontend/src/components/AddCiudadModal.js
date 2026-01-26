@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './AddCiudadModal.css';
 
-const AddCiudadModal = ({ isOpen, onClose, onAdd }) => {
+const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
   const [nuevaCiudad, setNuevaCiudad] = useState('');
   const [nuevaRegion, setNuevaRegion] = useState('');
   const [error, setError] = useState('');
@@ -26,6 +26,18 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd }) => {
     setNuevaCiudad('');
     setNuevaRegion('');
     setError('');
+    
+    // Cerrar modal después de guardar
+    setTimeout(() => {
+      onClose();
+    }, 300);
+  };
+
+  const handleClose = () => {
+    setNuevaCiudad('');
+    setNuevaRegion('');
+    setError('');
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -35,11 +47,15 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd }) => {
       <div className="modal-content">
         <div className="modal-header">
           <h2>Agregar Nueva Ciudad</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={handleClose}>✕</button>
         </div>
 
         <div className="modal-body">
           {error && <div className="modal-error">{error}</div>}
+
+          <div className="modal-info">
+            <small>Ciudades disponibles: {(ciudades || []).length}</small>
+          </div>
 
           <div className="modal-form-group">
             <label htmlFor="ciudad">Ciudad *</label>
@@ -53,6 +69,7 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd }) => {
               }}
               placeholder="Ej: SANTA FE DE ANTIOQUIA"
               maxLength="50"
+              autoFocus
             />
           </div>
 
@@ -77,7 +94,7 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd }) => {
         </div>
 
         <div className="modal-footer">
-          <button className="btn-cancel" onClick={onClose}>
+          <button className="btn-cancel" onClick={handleClose}>
             Cancelar
           </button>
           <button className="btn-add" onClick={handleAdd}>

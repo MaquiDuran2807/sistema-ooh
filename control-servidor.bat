@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-cd /d "c:\Users\migduran\Documents\nuevo ooh"
+cd /d "%~dp0"
 
 :menu
 cls
@@ -41,27 +41,29 @@ echo ============================================
 echo.
 
 start "OOH Backend - Puerto 8080" cmd /k ^
-  "cd /d \"c:\Users\migduran\Documents\nuevo ooh\backend\" && ^
-   set PATH=C:\Program Files\nodejs;%PATH% && ^
+  "cd /d \"%~dp0backend\" && ^
+   setlocal enabledelayedexpansion && ^
+   set PATH=C:\Program Files\nodejs;!PATH! && ^
    echo. && ^
    echo ============================================ && ^
    echo   BACKEND EJECUTANDOSE EN PUERTO 8080 && ^
    echo   CON NODEMON - Auto-restart activado && ^
    echo ============================================ && ^
    echo. && ^
-   call \"C:\Program Files\nodejs\npm.cmd\" run dev"
+   call npm run dev"
 
 timeout /t 3 /nobreak
 
 start "OOH Frontend - Puerto 3000" cmd /k ^
-  "cd /d \"c:\Users\migduran\Documents\nuevo ooh\frontend\" && ^
-   set PATH=C:\Program Files\nodejs;%PATH% && ^
+  "cd /d \"%~dp0frontend\" && ^
+   setlocal enabledelayedexpansion && ^
+   set PATH=C:\Program Files\nodejs;!PATH! && ^
    echo. && ^
    echo ============================================ && ^
    echo   FRONTEND EJECUTANDOSE EN PUERTO 3000 && ^
    echo ============================================ && ^
    echo. && ^
-   call \"C:\Program Files\nodejs\npm.cmd\" start"
+   call npm start"
 
 echo.
 echo ✅ Servidores iniciados
@@ -79,12 +81,13 @@ echo ============================================
 echo.
 
 start "OOH Backend - Puerto 8080" cmd /k ^
-  "cd /d \"c:\Users\migduran\Documents\nuevo ooh\backend\" && ^
-   set PATH=C:\Program Files\nodejs;%PATH% && ^
+  "cd /d \"%~dp0backend\" && ^
+   setlocal enabledelayedexpansion && ^
+   set PATH=C:\Program Files\nodejs;!PATH! && ^
    echo. && ^
    echo Backend iniciado en puerto 8080 con NODEMON && ^
    echo. && ^
-   call \"C:\Program Files\nodejs\npm.cmd\" run dev"
+   call npm run dev"
 
 echo ✅ Backend iniciado en puerto 8080
 timeout /t 3 /nobreak
@@ -98,12 +101,13 @@ echo ============================================
 echo.
 
 start "OOH Frontend - Puerto 3000" cmd /k ^
-  "cd /d \"c:\Users\migduran\Documents\nuevo ooh\frontend\" && ^
-   set PATH=C:\Program Files\nodejs;%PATH% && ^
+  "cd /d \"%~dp0frontend\" && ^
+   setlocal enabledelayedexpansion && ^
+   set PATH=C:\Program Files\nodejs;!PATH! && ^
    echo. && ^
    echo Frontend iniciado en puerto 3000 && ^
    echo. && ^
-   call \"C:\Program Files\nodejs\npm.cmd\" start"
+   call npm start"
 
 echo ✅ Frontend iniciado en puerto 3000
 timeout /t 3 /nobreak

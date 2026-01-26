@@ -25,7 +25,7 @@ export const AppProvider = ({ children }) => {
         return brandsData;
       }
     } catch (error) {
-      console.error('Error cargando marcas:', error);
+      console.error('❌ Error cargando marcas:', error);
       return [];
     }
   }, []);
@@ -54,7 +54,7 @@ export const AppProvider = ({ children }) => {
         return typesData;
       }
     } catch (error) {
-      console.error('Error cargando tipos OOH:', error);
+      console.error('❌ Error cargando tipos OOH:', error);
       return [];
     }
   }, []);
@@ -84,14 +84,27 @@ export const AppProvider = ({ children }) => {
         categoria
       });
       if (res.data.success) {
-        await fetchBrands(); // Refrescar lista
+        // Refrescar lista de marcas
+        const updatedBrands = await (async () => {
+          const brandRes = await axios.get(`${API_URL}/api/ooh/brands/all`);
+          if (brandRes.data.success) {
+            const brandsData = brandRes.data.data.map(b => ({
+              id: b.id,
+              nombre: b.nombre,
+              categoria: b.categoria || ''
+            }));
+            setBrands(brandsData);
+            return brandsData;
+          }
+          return [];
+        })();
         return res.data.data;
       }
     } catch (error) {
       console.error('Error creando marca:', error);
       throw error;
     }
-  }, [fetchBrands]);
+  }, []);
 
   // Crear campaña
   const createCampaign = useCallback(async (nombre, brandId) => {
@@ -114,14 +127,23 @@ export const AppProvider = ({ children }) => {
     try {
       const res = await axios.post(`${API_URL}/api/ooh/ooh-types/create`, { nombre });
       if (res.data.success) {
-        await fetchOohTypes(); // Refrescar lista
+        // Refrescar lista de tipos
+        const updatedTypes = await (async () => {
+          const typeRes = await axios.get(`${API_URL}/api/ooh/ooh-types/all`);
+          if (typeRes.data.success) {
+            const typesData = typeRes.data.data.map(t => t.nombre);
+            setOohTypes(typesData);
+            return typesData;
+          }
+          return [];
+        })();
         return res.data.data;
       }
     } catch (error) {
       console.error('Error creando tipo OOH:', error);
       throw error;
     }
-  }, [fetchOohTypes]);
+  }, []);
 
   // Crear o actualizar registro
   const saveRecord = useCallback(async (formData, images, imageIndexes, existingId) => {
@@ -155,14 +177,23 @@ export const AppProvider = ({ children }) => {
       });
 
       if (res.data.success) {
-        await fetchRecords(); // Refrescar lista
+        // Refrescar lista de registros
+        setLoading(true);
+        try {
+          const recordRes = await axios.get(`${API_URL}/api/ooh/all`);
+          if (recordRes.data.success) {
+            setRecords(recordRes.data.data);
+          }
+        } finally {
+          setLoading(false);
+        }
         return res.data.data;
       }
     } catch (error) {
       console.error('Error guardando registro:', error);
       throw error;
     }
-  }, [fetchRecords]);
+  }, []);
 
   const value = {
     brands,

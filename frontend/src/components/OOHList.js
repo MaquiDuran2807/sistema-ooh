@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './OOHList.css';
 import { useApp } from '../context/AppContext';
@@ -27,32 +27,7 @@ const OOHList = () => {
   const [editData, setEditData] = useState({});
   const [imageReplacements, setImageReplacements] = useState({});
 
-  // Convertir registro de objeto (BD) a array (formato legacy)
-  const recordToArray = (record) => {
-    if (Array.isArray(record)) return record;
-    return [
-      record.id || '',           // [0]
-      record.id || '',           // [1]
-      record.marca || '',        // [2]
-      record.categoria || '',    // [3]
-      record.proveedor || '',    // [4]
-      record.campana || '',      // [5]
-      record.direccion || '',    // [6]
-      record.ciudad || '',       // [7]
-      record.region || '',       // [8]
-      record.latitud || '',      // [9]
-      record.longitud || '',     // [10]
-      record.imagen_1 || '',     // [11]
-      record.imagen_2 || '',     // [12]
-      record.imagen_3 || '',     // [13]
-      record.fecha_inicio || '', // [14]
-      record.fecha_final || '',  // [15]
-      '',                        // [16]
-      record.tipo_ooh || ''      // [17]
-    ];
-  };
-
-    const resolveImageUrl = (raw) => {
+  const resolveImageUrl = (raw) => {
       if (!raw) return null;
       let val = String(raw);
       
@@ -67,7 +42,7 @@ const OOHList = () => {
       // Windows absoluta con backslashes
       if (/^[a-z]:\\/i.test(val) || val.includes('\\')) {
         // Buscar "local-images" en el path (insensible a mayúsculas)
-        const regex = /local-images[\\\/]/i;
+        const regex = /local-images[\\/]/i;
         const match = val.match(regex);
         if (match) {
           const startIndex = val.indexOf(match[0]) + match[0].length;
@@ -113,11 +88,7 @@ const OOHList = () => {
     }
   }, [records]);
 
-  useEffect(() => {
-    applyFilters();
-  }, [records, searchDireccion, filterMarca, filterCampana, filterFechaInicio, filterFechaFin]);
-
-  const applyFilters = () => {
+  const applyFilters = useCallback(() => {
     if (!records) return;
     
     let filtered = [...records];
@@ -158,7 +129,11 @@ const OOHList = () => {
     }
 
     setFilteredData(filtered);
-  };
+  }, [records, searchDireccion, filterMarca, filterCampana, filterFechaInicio, filterFechaFin]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
 
   const clearFilters = () => {
     setSearchDireccion('');
@@ -239,19 +214,19 @@ const OOHList = () => {
   const openModal = (record) => {
     setSelectedRecord(record);
     setEditData({
-      id: record[1],
-      marca: record[2],
-      categoria: record[3],
-      proveedor: record[4],
-      campana: record[5],
-      direccion: record[6],
-      ciudad: record[7],
-      region: record[8],
-      latitud: record[9],
-      longitud: record[10],
-      fechaInicio: record[14],
-      fechaFin: record[15],
-      tipoOOH: record[17]
+      id: record.id,
+      marca: record.marca,
+      categoria: record.categoria,
+      proveedor: record.proveedor,
+      campana: record.campana,
+      direccion: record.direccion,
+      ciudad: record.ciudad,
+      region: record.region,
+      latitud: record.latitud,
+      longitud: record.longitud,
+      fechaInicio: record.fecha_inicio,
+      fechaFin: record.fecha_final,
+      tipoOOH: record.tipo_ooh
     });
     setEditMode(false);
     setShowModal(true);
@@ -542,17 +517,17 @@ const OOHList = () => {
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{selectedRecord[2]} - {selectedRecord[5]}</h2>
+              <h2>{selectedRecord.marca} - {selectedRecord.campana}</h2>
               <button className="modal-close" onClick={closeModal}>✕</button>
             </div>
 
             <div className="modal-body">
               {/* Imagen principal */}
-              {resolveImageUrl(selectedRecord[11]) && (
+              {resolveImageUrl(selectedRecord.imagen_1) && (
                 <div className="modal-image">
                   <img 
-                    src={resolveImageUrl(selectedRecord[11])} 
-                    alt={`${selectedRecord[2]} - ${selectedRecord[5]}`}
+                    src={resolveImageUrl(selectedRecord.imagen_1)} 
+                    alt={`${selectedRecord.marca} - ${selectedRecord.campana}`}
                     onError={(e) => {
                       e.target.onerror = null;
                       e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100%25" height="300"%3E%3Crect fill="%23ddd" width="100%25" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3ESin imagen%3C/text%3E%3C/svg%3E';
@@ -565,7 +540,7 @@ const OOHList = () => {
               <div className="modal-details">
                 <div className="detail-row">
                   <strong>ID:</strong>
-                  <span>{selectedRecord[1]}</span>
+                  <span>{selectedRecord.id}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Marca:</strong>
@@ -577,7 +552,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[2]}</span>
+                    <span>{selectedRecord.marca}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -590,7 +565,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[5]}</span>
+                    <span>{selectedRecord.campana}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -603,7 +578,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[3]}</span>
+                    <span>{selectedRecord.categoria}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -616,7 +591,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[4]}</span>
+                    <span>{selectedRecord.proveedor}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -629,7 +604,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[6]}</span>
+                    <span>{selectedRecord.direccion}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -642,7 +617,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[7]}</span>
+                    <span>{selectedRecord.ciudad}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -655,7 +630,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord[8]}</span>
+                    <span>{selectedRecord.region}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -680,7 +655,7 @@ const OOHList = () => {
                       />
                     </div>
                   ) : (
-                    <span>{selectedRecord[9]},{selectedRecord[10]}</span>
+                    <span>{selectedRecord.latitud},{selectedRecord.longitud}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -693,7 +668,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{formatDate(selectedRecord[14])}</span>
+                    <span>{formatDate(selectedRecord.fecha_inicio)}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -706,12 +681,12 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{formatDate(selectedRecord[15])}</span>
+                    <span>{formatDate(selectedRecord.fecha_final)}</span>
                   )}
                 </div>
                 <div className="detail-row">
                   <strong>Fotos:</strong>
-                  <span>{[selectedRecord[11], selectedRecord[12], selectedRecord[13]].filter(Boolean).length}</span>
+                  <span>{[selectedRecord.imagen_1, selectedRecord.imagen_2, selectedRecord.imagen_3].filter(Boolean).length}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Tipo OOH:</strong>
@@ -724,20 +699,20 @@ const OOHList = () => {
                       list="tiposOOH"
                     />
                   ) : (
-                    <span>{selectedRecord[17]}</span>
+                    <span>{selectedRecord.tipo_ooh}</span>
                   )}
                 </div>
               </div>
 
               {/* Galería de imágenes - Las 3 imágenes */}
               <div className="modal-gallery">
-                <h3>📸 Todas las imágenes ({[selectedRecord[11], selectedRecord[12], selectedRecord[13]].filter(Boolean).length}/3)</h3>
+                <h3>📸 Todas las imágenes ({[selectedRecord.imagen_1, selectedRecord.imagen_2, selectedRecord.imagen_3].filter(Boolean).length}/3)</h3>
                 
                 <div className="gallery-grid">
                   {[
-                    { url: selectedRecord[11], num: 1 },
-                    { url: selectedRecord[12], num: 2 },
-                    { url: selectedRecord[13], num: 3 }
+                    { url: selectedRecord.imagen_1, num: 1 },
+                    { url: selectedRecord.imagen_2, num: 2 },
+                    { url: selectedRecord.imagen_3, num: 3 }
                   ].map((item, idx) => (
                     <div key={idx} className={`gallery-item ${!item.url ? 'empty' : ''}`}>
                       {item.url ? (

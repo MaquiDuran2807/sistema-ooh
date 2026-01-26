@@ -90,6 +90,16 @@
   font-weight: 500;
 }
 
+.modal-info {
+  background: #e7f3ff;
+  color: #004085;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  border: 1px solid #b8daff;
+  font-size: 0.85em;
+}
+
 .modal-form-group {
   margin-bottom: 20px;
 }

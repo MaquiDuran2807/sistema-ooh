@@ -54,17 +54,27 @@ const OOHForm = ({ onSuccess }) => {
 
   // Cargar marcas desde contexto global
   useEffect(() => {
-    fetchBrands().then(data => {
-      if (data) setAvailableMarcas(data);
-    });
-  }, [fetchBrands]);
+    const loadBrands = async () => {
+      const data = await fetchBrands();
+      if (data) {
+        setAvailableMarcas(data);
+      }
+    };
+    loadBrands();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Sin dependencias — ejecutar UNA SOLA VEZ al montar
 
   // Cargar tipos OOH desde contexto global
   useEffect(() => {
-    fetchOohTypes().then(data => {
-      if (data) setAvailableTiposOOH(data);
-    });
-  }, [fetchOohTypes]);
+    const loadTypes = async () => {
+      const data = await fetchOohTypes();
+      if (data) {
+        setAvailableTiposOOH(data);
+      }
+    };
+    loadTypes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Sin dependencias — ejecutar UNA SOLA VEZ al montar
 
   // Cargar proveedores desde localStorage
   useEffect(() => {
@@ -124,7 +134,7 @@ const OOHForm = ({ onSuccess }) => {
       setShowAddMarcaModal(false);
       setMessage({ type: 'success', text: 'Marca creada exitosamente' });
     } catch (error) {
-      console.error('Error creando marca:', error);
+      console.error('❌ Error creando marca:', error);
       setMessage({ type: 'error', text: 'Error al crear marca' });
     }
   };
@@ -629,6 +639,7 @@ const OOHForm = ({ onSuccess }) => {
         isOpen={showAddCiudadModal}
         onClose={() => setShowAddCiudadModal(false)}
         onAdd={handleAddCiudad}
+        ciudades={availableCities}
       />
 
       <AddMarcaModal 

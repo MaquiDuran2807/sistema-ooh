@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './App.css';
 import OOHForm from './components/OOHForm';
 import OOHList from './components/OOHList';
+import DebugPanel from './components/DebugPanel';
 import { AppProvider } from './context/AppContext';
 
 function App() {
@@ -40,6 +41,8 @@ function App() {
           {activeTab === 'form' && <OOHForm onSuccess={handleFormSuccess} />}
           {activeTab === 'list' && <OOHList key={refreshList} />}
         </div>
+
+        <DebugPanel />
       </div>
     </AppProvider>
   );

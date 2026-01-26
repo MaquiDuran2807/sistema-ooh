@@ -1,264 +1,250 @@
 # OOH Advertising Management System
 
-Sistema completo de gestión de publicidad en espacios exteriores (Out of Home) con formulario React, backend Node.js, almacenamiento en **Google Cloud Storage** e integración con Excel.
-
-## ⭐ Actualizado a GCP
-
-Este proyecto ahora está optimizado para **Google Cloud Platform** con Cloud Run y Cloud Storage. [Ver guía de migración →](GCP_MIGRATION.md)
+Sistema local de gestión de publicidad OOH con frontend React, backend Node.js/Express y base de datos SQLite en memoria (sql.js) respaldada en disco, más almacenamiento local de imágenes.
 
 ## 🚀 Características
 
-- ✅ **Formulario React** - Interfaz moderna y responsiva para captar información OOH
-- ✅ **API Node.js/Express** - Backend robusto con manejo de imágenes y datos
-- ✅ **Google Cloud Storage** - Almacenamiento seguro de imágenes en la nube
-- ✅ **Excel Integration** - Actualización automática de archivo Excel con registros
-- ✅ **Cloud Run Deployment** - Serverless y escalable automáticamente
-- ✅ **Validaciones** - Validación de campos, tamaño de imágenes y tipos de archivo
-- ✅ **Interfaz Moderna** - Diseño responsivo con gradientes y animaciones
+- ✅ **Formulario React** con Context API para compartir estado
+- ✅ **API Node.js/Express** con subida y validación de imágenes
+- ✅ **SQLite (sql.js)** con tablas relacionales (`brands`, `campaigns`, `ooh_types`, `ooh_records`)
+- ✅ **Imágenes hash** guardadas en `backend/local-images/`
+- ✅ **Scripts de arranque** para levantar backend y frontend en consolas separadas
 
 ## 📋 Campos del Formulario
 
-- **Marca** - Nombre de la marca
-- **Campaña** - Nombre de la campaña
-- **Dirección** - Ubicación del anuncio OOH
-- **3 Imágenes** - Subida de 3 imágenes (máx 5MB cada una)
-- **Fecha de Vigencia** - Fecha hasta la cual estará activa la campaña
+- **Marca**
+- **Campaña**
+- **Tipo OOH** (según catálogo `ooh_types`)
+- **Dirección**
+- **3 Imágenes** (máx 5MB c/u)
+- **Fecha de Vigencia**
 
 ## 🏗️ Estructura del Proyecto
 
 ```
 nuevo ooh/
-├── backend/                 # Servidor Node.js
+├── backend/
 │   ├── controllers/
-│   │   └── oohController.js
 │   ├── routes/
-│   │   └── ooh.js
 │   ├── services/
-│   │   ├── excelService.js
-│   │   └── s3Service.js
-│   ├── server.js
-│   ├── package.json
-│   ├── .env.example
-│   └── README.md
-│
-└── frontend/                # Aplicación React
-    ├── public/
-    │   └── index.html
-    ├── src/
-    │   ├── components/
-    │   │   ├── OOHForm.js
-    │   │   ├── OOHForm.css
-    │   │   ├── OOHList.js
-    │   │   └── OOHList.css
-    │   ├── services/
-    │   │   └── api.js
-    │   ├── App.js
-    │   ├── index.css
-    │   └── index.js
-    ├── package.json
-    └── README.md
+│   ├── local-images/        # Carpeta de imágenes guardadas (hash)
+│   └── start-dev.bat        # Instala deps, migra CSV y corre en dev
+├── frontend/
+│   └── start-frontend.bat   # Levanta React en localhost:3000
+└── start-all.bat            # Levanta backend + frontend y abre el navegador
 ```
 
 ## ⚙️ Requisitos
 
-- Node.js 14+
-- npm o yarn
-- Cuenta Google Cloud Platform (con $300 crédito gratis)
-- gcloud CLI instalada
-- Excel (opcional, para ver el archivo generado)
+- Node.js 18+ (incluye npm)
+- Windows (scripts `.bat`)
 
-## 🔧 Instalación y Configuración
+## 🔧 Cómo ejecutar en local
 
-### 1️⃣ Configurar Google Cloud (20 minutos)
+Opción rápida (dos consolas + navegador):
 
-Sigue [GCP_STORAGE_SETUP.md](GCP_STORAGE_SETUP.md) para:
-- Crear proyecto GCP
-- Configurar Cloud Storage bucket
-- Crear service account
-- Obtener credenciales
+```bash
+start-all.bat
+```
 
-### 2️⃣ Backend
+Esto llama a `backend/start-dev.bat` y `frontend/start-frontend.bat`, y abre http://localhost:3000.
 
-1. Navega a la carpeta backend:
+Ejecución manual:
+
+1) Backend
+
 ```bash
 cd backend
+start-dev.bat
 ```
 
-2. Instala las dependencias:
+- Instala dependencias si faltan
+- Migra el CSV inicial a SQLite (tablas `brands`, `campaigns`, `ooh_types`, `ooh_records`)
+- Levanta el servidor en http://localhost:8080
+
+2) Frontend
+
 ```bash
-npm install
+cd frontend
+start-frontend.bat
 ```
 
-3. Crea archivo `.env` basado en `.env.example`:
-```env
-PORT=8080
-GCP_PROJECT_ID=your-gcp-project-id
-GCP_STORAGE_BUCKET=ooh-images-prod
-GCP_KEY_FILE=./ooh-key.json
-EXCEL_FILE_PATH=./ooh_data.xlsx
-```
+- Levanta React en http://localhost:3000 apuntando al backend local
 
-4. Copia tu archivo `ooh-key.json` a la carpeta backend
+## 🧪 Tests
 
-5. Inicia el servidor:
+### Ejecutar todos los tests a la vez:
+
 ```bash
-npm start
+start-all-tests.bat
 ```
 
-O para desarrollo con auto-reload:
+Esto ejecuta:
+1. **Backend Tests** - Jest + Supertest (Node.js)
+2. **Frontend Tests** - React Testing Library
+
+### Tests Individuales
+
+**Backend:**
 ```bash
+cd backend
+start-tests.bat          # Ejecuta tests y cierra
+npm test -- --watch     # Modo watch (desarrollo)
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm test                 # Modo watch interactivo
+npm run test             # Ejecuta tests y muestra cobertura
+```
+
+### Cobertura de Tests
+
+Los tests incluyen:
+
+- **Unitarios**: Componentes individuales (AddMarcaModal, OOHForm, OOHList)
+- **Contexto**: AppContext global y funciones de estado
+- **Integración**: Flujos completos (crear registro → guardar → ver en lista)
+- **Snapshots**: Validar cambios de UI
+- **User Interactions**: Emular clicks, inputs, uploads
+- **API Mocking**: Simular respuestas del backend
+
+### Archivos de Test
+
+```
+frontend/
+├── src/
+│   ├── __tests__/
+│   │   └── App.integration.test.js        # Tests de flujo completo
+│   ├── components/
+│   │   └── __tests__/
+│   │       ├── AddMarcaModal.test.js      # Modal de agregar marca
+│   │       ├── OOHForm.test.js            # Formulario principal
+│   │       └── OOHList.test.js            # Lista de registros
+│   └── context/
+│       └── __tests__/
+│           └── AppContext.test.js         # Estado global
+└── setupTests.js                           # Configuración Jest
+
+backend/
+├── __tests__/
+│   ├── images.test.js                      # Tests de imágenes
+│   └── database.test.js                    # Tests de base de datos (si existe)
+```
+
+### Comandos Útiles
+
+```bash
+# Ejecutar tests específicos
+npm test -- AddMarcaModal
+
+# Modo watch
+npm test -- --watch
+
+# Cobertura detallada
+npm test -- --coverage
+
+# Tests sin watch
+npm test -- --watchAll=false
+
+# Tests con patrón específico
+npm test -- --testNamePattern="renders modal"
+```
+
+### Snapshots
+
+Los tests generan snapshots del componente. Si cambias UI y los tests fallan:
+
+```bash
+# Revisar cambios
+npm test -- -u    # Actualizar snapshots después de revisar
+
+# Ver diff
+npm test -- --updateSnapshot
+```
+
+## ✅ Validación de Tests
+
+Todos los tests deben pasar antes de hacer cambios. Usa:
+
+```bash
+start-all-tests.bat
+```
+
+Si algún test falla:
+1. Lee el mensaje de error
+2. Abre el archivo test correspondiente
+3. Verifica la lógica del componente
+4. Corre test nuevamente
+
+## ℹ️ Notas sobre ejecutables
+
+- No se distribuye un `.exe` para `start-all`; el arranque es vía `start-all.bat`.
+- Si necesitas un lanzador único, puedes crear un acceso directo al `.bat` o empaquetar con herramientas tipo `pkg`, pero no está incluido en este repo.
+
+## 📡 API (principales)
+
+- `POST /api/ooh/create` — crea registro OOH con 3 imágenes (valida tamaño y tipo)
+- `GET /api/ooh/all` — lista registros con joins a catálogos
+- `GET /api/ooh/:id` — detalle por ID
+
+## 💾 Almacenamiento de datos e imágenes
+
+- Base relacional SQLite en memoria con persistencia en archivo; se carga/migra desde CSV al iniciar.
+- Imágenes guardadas localmente en `backend/local-images/` con nombres hash + extensión original.
+- Catálogos (`ooh_types`, `brands`, `campaigns`) normalizan los registros en `ooh_records`.
+
+## 🐛 Troubleshooting rápido
+
+- Si no arranca el backend, borra `node_modules` y vuelve a ejecutar `backend/start-dev.bat`.
+- Si no ves datos, revisa que el CSV fuente esté accesible y que la migración haya corrido (se ejecuta al iniciar el backend).
+- Si el frontend no carga, confirma que el backend está en http://localhost:8080 y reinicia `start-frontend.bat`.
+ - Si el frontend no carga, confirma que el backend está en http://localhost:8080 y reinicia `start-frontend.bat`.
+ 
+## ▶️ Nuevos scripts de arranque
+
+Se añadieron scripts para facilitar el arranque local. Uso rápido:
+
+- **`start-all.bat`**: instala dependencias si es necesario (usa `npm ci` cuando exista `package-lock.json`), ejecuta la migración CSV del backend y levanta backend + frontend en ventanas separadas. Ejecutar desde la raíz:
+
+```powershell
+cd "c:\Users\migduran\Documents\nuevo ooh"
+.\start-all.bat
+```
+
+- **`start-direct.bat`**: arranca backend y frontend directamente (no instala dependencias). Útil cuando ya instalaste `node_modules` en ambas carpetas:
+
+```powershell
+cd "c:\Users\migduran\Documents\nuevo ooh"
+.\start-direct.bat
+```
+
+- **Arranque manual (rápido)**:
+
+```powershell
+cd backend
+npm run dev
+
+cd ../frontend
+npm run dev   # o npm start
+```
+
+- **Solución rápida: `react-scripts` no encontrado**
+
+Si ves "react-scripts no se reconoce", corrige la versión y reinstala:
+
+```powershell
+cd frontend
+npm install react-scripts@5.0.1 --save
+if (Test-Path package-lock.json) { npm ci } else { npm install }
 npm run dev
 ```
 
-### 3️⃣ Frontend
+Esto instala el paquete correcto y recrea `node_modules` para que `react-scripts` esté disponible.
 
-1. En otra terminal, navega a frontend:
-```bash
-cd frontend
-```
-
-2. Instala las dependencias:
-```bash
-npm install
-```
-
-3. (Opcional) Crea archivo `.env` para configurar URL de API:
-```env
-REACT_APP_API_URL=http://localhost:8080
-```
-
-4. Inicia la aplicación:
-```bash
-npm start
-```
-
-Se abrirá automáticamente en http://localhost:3000
-
-### 4️⃣ Deploy a Google Cloud (15 minutos)
-
-Una vez configurado localmente:
-
-**Windows:**
-```bash
-deploy-gcp.bat all
-```
-
-**Mac/Linux:**
-```bash
-chmod +x deploy-gcp.sh
-./deploy-gcp.sh all
-```
-
-Ver [DEPLOYMENT.md](DEPLOYMENT.md) para más opciones.
-
-## 📡 API Endpoints
-
-### POST /api/ooh/create
-Crea un nuevo registro OOH con imágenes
-
-**Request:**
-- `marca` (string) - Nombre de la marca
-- `campana` (string) - Nombre de la campaña  
-- `direccion` (string) - Ubicación
-- `fechaVigencia` (date) - Fecha de vigencia
-- `images` (file[]) - 3 archivos de imagen
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Registro creado exitosamente",
-  "data": {
-    "id": "uuid",
-    "marca": "Nike",
-    "campana": "Summer Campaign",
-    "direccion": "Calle Principal 123",
-    "imagenes": ["url1", "url2", "url3"],
-    "fechaVigencia": "2024-12-31",
-    "fechaCreacion": "2024-01-22T..."
-  }
-}
-```
-
-### GET /api/ooh/all
-Obtiene todos los registros
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": [[row1], [row2], ...]
-}
-```
-
-### GET /api/ooh/:id
-Obtiene un registro específico por ID
-
-## 💾 Almacenamiento
-
-- **Imágenes**: Se guardan automáticamente en AWS S3 con estructura `ooh-images/timestamp-uuid-filename`
-- **Datos**: Se guardan en archivo Excel local `ooh_data.xlsx` con todas las columnas necesarias
-
-## 🎨 Customización
-
-### Cambiar colores
-Los colores principales están en los archivos CSS:
-- Color primario: `#667eea`
-- Color secundario: `#764ba2`
-
-Modifica estos valores en:
-- `frontend/src/index.css`
-- `frontend/src/components/OOHForm.css`
-- `frontend/src/components/OOHList.css`
-
-### Agregar más campos
-1. Edita el formulario en `OOHForm.js`
-2. Agrega las columnas en `excelService.js`
-3. Actualiza el controlador en `oohController.js`
-
-## 📚 Dependencias Principales
-
-**Backend:**
-- express - Framework web
-- multer - Manejo de carga de archivos
-- aws-sdk - Integración con AWS S3
-- exceljs - Lectura/escritura de Excel
-- cors - Control de origen cruzado
-
-**Frontend:**
-- react - Librería UI
-- axios - Cliente HTTP
-- react-scripts - Scripts de build
-
-## 🐛 Troubleshooting
-
-**Error de conexión a S3:**
-- Verifica que las credenciales AWS sean correctas en `.env`
-- Asegúrate de que el bucket existe y es accesible
-- Comprueba los permisos IAM
-
-**Error al cargar archivos:**
-- Verifica el límite de tamaño (5MB)
-- Asegúrate de que solo estés subiendo imágenes
-- Comprueba que estés subiendo exactamente 3 imágenes
-
-**Excel no se actualiza:**
-- Verifica la ruta del archivo en `EXCEL_FILE_PATH`
-- Asegúrate de tener permisos de escritura en esa carpeta
-- Cierra el Excel si está abierto
-
-## 📝 Notas Importantes
-
-- Los IDs se generan automáticamente como UUID
-- Las fechas se guardan en formato ISO
-- Los links de imágenes son públicos en S3
-- El archivo Excel se crea automáticamente en la primera solicitud
-- Las imágenes se nombran con timestamp + UUID para evitar conflictos
+Si prefieres que el script instale automáticamente dependencias cuando falta `node_modules`, puedo actualizar `start-direct.bat` o `start-all.bat` para hacerlo.
 
 ## 📄 Licencia
 
-Este proyecto está disponible bajo licencia libre.
-
-## 👨‍💻 Soporte
-
-Para reportar errores o sugerencias, crea un issue en el repositorio.
+Proyecto disponible bajo licencia libre.

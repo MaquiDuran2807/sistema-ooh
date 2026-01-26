@@ -1,16 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './AddMarcaModal.css';
+import { useApp } from '../context/AppContext';
 
 const AddMarcaModal = ({ isOpen, onClose, onAdd }) => {
+  const { fetchBrands } = useApp(); 
   const [nuevaMarca, setNuevaMarca] = useState('');
   const [nuevaCategoria, setNuevaCategoria] = useState('');
   const [nuevasCampanas, setNuevasCampanas] = useState('');
   const [error, setError] = useState('');
+  const [brandsCount, setBrandsCount] = useState(0);
+  const [debug, setDebug] = useState(false); // Para ver estado
 
   const categorias = ['CERVEZAS', 'NABS'];
 
+  // Cargar marcas cuando el modal se abre
+  useEffect(() => {
+    if (isOpen) {
+      const loadData = async () => {
+        console.log('🔵 AddMarcaModal: Cargando datos porque isOpen=true');
+        const data = await fetchBrands();
+        console.log('📊 AddMarcaModal recibió brands:', data?.length, data);
+        if (data) {
+          setBrandsCount(data.length);
+        }
+      };
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]); // Solo isOpen, fetchBrands viene del contexto
+
   const handleSubmit = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     
     if (!nuevaMarca.trim()) {
       setError('El nombre de la marca es obligatorio');
@@ -37,6 +57,11 @@ const AddMarcaModal = ({ isOpen, onClose, onAdd }) => {
     setNuevaCategoria('');
     setNuevasCampanas('');
     setError('');
+    
+    // Cerrar modal después de guardar
+    setTimeout(() => {
+      onClose();
+    }, 300);
   };
 
   const handleClose = () => {
@@ -60,6 +85,27 @@ const AddMarcaModal = ({ isOpen, onClose, onAdd }) => {
         <div className="modal-body">
           {error && <div className="modal-error">{error}</div>}
 
+          <div className="modal-info">
+            <small>Marcas existentes: {brandsCount}</small>
+            <button 
+              type="button"
+              style={{marginLeft: '10px', fontSize: '10px', padding: '2px 6px'}}
+              onClick={() => setDebug(!debug)}
+            >
+              {debug ? '🔍 Ocultar' : '🔍 Debug'}
+            </button>
+          </div>
+
+          {debug && (
+            <div className="modal-debug" style={{background: '#f0f0f0', padding: '8px', marginBottom: '10px', fontSize: '11px', border: '1px solid #ccc', borderRadius: '4px'}}>
+              <p><strong>Estado del Modal:</strong></p>
+              <p>nuevaMarca: "{nuevaMarca}"</p>
+              <p>nuevaCategoria: "{nuevaCategoria}"</p>
+              <p>nuevasCampanas: "{nuevasCampanas}"</p>
+              <p>brandsCount: {brandsCount}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit}>
             <div className="modal-form-group">
               <label>Nombre de la Marca *</label>
@@ -68,6 +114,7 @@ const AddMarcaModal = ({ isOpen, onClose, onAdd }) => {
                 value={nuevaMarca}
                 onChange={(e) => setNuevaMarca(e.target.value)}
                 placeholder="Ej: NUEVA MARCA"
+                autoFocus
               />
             </div>
 
