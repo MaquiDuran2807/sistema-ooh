@@ -1,13 +1,66 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import './OOHList.css';
 import { useApp } from '../context/AppContext';
+import dbService from '../services/dbService';
 
 const OOHList = () => {
-  const { records, fetchRecords, loading: contextLoading } = useApp();
+  const PAGE_SIZE = 48;
+  const PREFETCH_MARGIN_PX = 600;
+
+  const LazyImage = ({ src, alt, className, placeholder, onError }) => {
+    const imgRef = useRef(null);
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+      if (!imgRef.current) return;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        },
+        { root: null, rootMargin: '300px', threshold: 0.1 }
+      );
+
+      observer.observe(imgRef.current);
+      return () => observer.disconnect();
+    }, []);
+
+    if (!src) {
+      return placeholder || null;
+    }
+
+    return (
+      <img
+        ref={imgRef}
+        src={isVisible ? src : undefined}
+        data-src={src}
+        alt={alt}
+        className={className}
+        decoding="async"
+        onError={onError}
+      />
+    );
+  };
+
+  const { 
+    records, 
+    fetchRecords, 
+    loading: contextLoading,
+    brands,
+    campaigns: campaignsList,
+    cities: citiesList,
+    oohTypes: oohTypesList,
+    providers: providersList
+  } = useApp();
   
   const [filteredData, setFilteredData] = useState([]);
   const [error, setError] = useState(null);
+  const loadMoreRef = useRef(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   
   // Filtros
   const [searchDireccion, setSearchDireccion] = useState('');
@@ -26,6 +79,12 @@ const OOHList = () => {
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({});
   const [imageReplacements, setImageReplacements] = useState({});
+  
+  // Selección múltiple de tarjetas
+  const [selectedCards, setSelectedCards] = useState(new Set());
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const resolveImageUrl = (raw) => {
       if (!raw) return null;
@@ -47,11 +106,11 @@ const OOHList = () => {
         if (match) {
           const startIndex = val.indexOf(match[0]) + match[0].length;
           const rel = val.substring(startIndex).replace(/\\/g, '/');
-          return `http://localhost:8080/api/images/${rel}`;
+          return `http://localhost:8080/api/images/${encodeURI(rel)}`;
         }
         // Si no tiene local-images, tomar solo el filename como fallback
         const filename = val.split(/[/\\]/).pop();
-        return filename ? `http://localhost:8080/api/images/${filename}` : null;
+        return filename ? `http://localhost:8080/api/images/${encodeURI(filename)}` : null;
       }
 
       // Unix absoluta
@@ -59,13 +118,13 @@ const OOHList = () => {
         const parts = val.split(/local-images/i);
         if (parts.length > 1) {
           const rel = parts[1].replace(/^\//, '');
-          return `http://localhost:8080/api/images/${rel}`;
+          return `http://localhost:8080/api/images/${encodeURI(rel)}`;
         }
       }
 
       // Ruta relativa de API
       if (val.startsWith('/api/images')) {
-        return `http://localhost:8080${val}`;
+        return `http://localhost:8080${encodeURI(val)}`;
       }
 
       return val;
@@ -134,6 +193,50 @@ const OOHList = () => {
   useEffect(() => {
     applyFilters();
   }, [applyFilters]);
+
+  const hasActiveFilters = !!(searchDireccion || filterMarca || filterCampana || filterFechaInicio || filterFechaFin);
+  const displayData = useMemo(() => {
+    if (hasActiveFilters || filteredData.length > 0) {
+      return filteredData;
+    }
+    return records || [];
+  }, [filteredData, records, hasActiveFilters]);
+
+  const visibleRecords = useMemo(() => {
+    return displayData.slice(0, visibleCount);
+  }, [displayData, visibleCount]);
+
+  const hasMoreRecords = visibleCount < displayData.length;
+  const areAllVisibleSelected = useMemo(() => {
+    if (visibleRecords.length === 0) return false;
+    return visibleRecords.every(record => selectedCards.has(record.id));
+  }, [visibleRecords, selectedCards]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [displayData, PAGE_SIZE]);
+
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry.isIntersecting) return;
+        setVisibleCount(prev => {
+          if (prev >= displayData.length) return prev;
+          return Math.min(prev + PAGE_SIZE, displayData.length);
+        });
+      },
+      {
+        root: null,
+        rootMargin: `${PREFETCH_MARGIN_PX}px`,
+        threshold: 0.1
+      }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [displayData.length, PAGE_SIZE, PREFETCH_MARGIN_PX]);
 
   const clearFilters = () => {
     setSearchDireccion('');
@@ -221,7 +324,7 @@ const OOHList = () => {
       campana: record.campana,
       direccion: record.direccion,
       ciudad: record.ciudad,
-      region: record.region,
+      region: record.ciudad_region || record.region,
       latitud: record.latitud,
       longitud: record.longitud,
       fechaInicio: record.fecha_inicio,
@@ -240,6 +343,98 @@ const OOHList = () => {
     setImageReplacements({});
   };
 
+  // Manejar selección de tarjetas
+  const toggleCardSelection = (recordId) => {
+    setSelectedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(recordId)) {
+        newSet.delete(recordId);
+      } else {
+        newSet.add(recordId);
+      }
+      return newSet;
+    });
+  };
+
+  // Seleccionar/deseleccionar todas
+  const toggleSelectAll = () => {
+    if (areAllVisibleSelected) {
+      setSelectedCards(prev => {
+        const newSet = new Set(prev);
+        visibleRecords.forEach(record => newSet.delete(record.id));
+        return newSet;
+      });
+      return;
+    }
+
+    setSelectedCards(prev => {
+      const newSet = new Set(prev);
+      visibleRecords.forEach(record => newSet.add(record.id));
+      return newSet;
+    });
+  };
+
+  // Abrir modal de confirmación para eliminar
+  const openDeleteConfirmModal = () => {
+    if (selectedCards.size === 0) {
+      alert('Selecciona al menos una tarjeta para eliminar');
+      return;
+    }
+    setDeleteConfirmText('');
+    setShowDeleteConfirmModal(true);
+  };
+
+  // Cerrar modal de confirmación
+  const closeDeleteConfirmModal = () => {
+    setShowDeleteConfirmModal(false);
+    setDeleteConfirmText('');
+  };
+
+  // Confirmar eliminación
+  const confirmDelete = async () => {
+    if (deleteConfirmText.toUpperCase() !== 'DEL') {
+      alert('Debes escribir "DEL" para confirmar la eliminación');
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const idsToDelete = Array.from(selectedCards);
+      console.log(`🗑️  Eliminando ${idsToDelete.length} registros...`);
+
+      // Eliminar uno por uno
+      const results = await Promise.all(
+        idsToDelete.map(id =>
+          axios
+            .delete(`http://localhost:8080/api/ooh/${id}`)
+            .then(() => ({ id, success: true }))
+            .catch(err => ({ id, success: false, error: err.message }))
+        )
+      );
+
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+
+      let message = `✅ ${successful.length} registro(s) eliminado(s) correctamente`;
+      if (failed.length > 0) {
+        message += `\n⚠️  ${failed.length} no se pudieron eliminar`;
+      }
+      alert(message);
+
+      // Limpiar selección
+      setSelectedCards(new Set());
+      closeDeleteConfirmModal();
+
+      // Recargar datos
+      fetchRecords();
+    } catch (error) {
+      console.error('Error eliminando registros:', error);
+      alert('❌ Error al eliminar los registros');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleEditChange = (field, value) => {
     setEditData(prev => ({ ...prev, [field]: value }));
   };
@@ -252,31 +447,69 @@ const OOHList = () => {
 
   const saveChanges = async () => {
     try {
-      // Preparar FormData para enviar con imágenes
+      console.log('🔄 [OOHLIST - ACTUALIZAR] Editando registro existente ID:', editData.id);
+      console.log('📝 Datos actuales:', editData);
+      
+      // ✅ NUEVO: Obtener IDs desde AppContext (no enviar nombres)
+      console.log('🔍 [ACTUALIZAR] Mapeando nombres a IDs...');
+      
+      const brand = await dbService.getBrandByName(editData.marca, brands);
+      const city = await dbService.getCityByName(editData.ciudad, citiesList);
+      const oohType = await dbService.getOOHTypeByName(editData.tipoOOH, oohTypesList);
+      const provider = await dbService.getProviderByName(editData.proveedor, providersList);
+      const campaign = await dbService.getCampaignByName(editData.campana, campaignsList);
+      
+      console.log('📊 [ACTUALIZAR] IDs obtenidos:');
+      console.log(`   brand_id: ${brand?.id} (${editData.marca})`);
+      console.log(`   city_id: ${city?.id} (${editData.ciudad})`);
+      console.log(`   ooh_type_id: ${oohType?.id} (${editData.tipoOOH})`);
+      console.log(`   provider_id: ${provider?.id} (${editData.proveedor})`);
+      console.log(`   campaign_id: ${campaign?.id} (${editData.campana})`);
+      
+      // Validar que se obtuvieron todos los IDs
+      if (!brand?.id || !city?.id || !oohType?.id || !provider?.id || !campaign?.id) {
+        const missing = [];
+        if (!brand?.id) missing.push(`marca "${editData.marca}"`);
+        if (!city?.id) missing.push(`ciudad "${editData.ciudad}"`);
+        if (!oohType?.id) missing.push(`tipo OOH "${editData.tipoOOH}"`);
+        if (!provider?.id) missing.push(`proveedor "${editData.proveedor}"`);
+        if (!campaign?.id) missing.push(`campaña "${editData.campana}"`);
+        
+        alert(`❌ No se encontraron: ${missing.join(', ')}. Verifica los datos ingresados.`);
+        return;
+      }
+      
+      // Preparar FormData para enviar con IDs (no nombres)
       const formData = new FormData();
-      formData.append('existingId', editData.id);
-      formData.append('marca', editData.marca);
-      formData.append('categoria', editData.categoria);
-      formData.append('proveedor', editData.proveedor);
-      formData.append('campana', editData.campana);
+      formData.append('existingId', editData.id); // ← ESTO INDICA AL BACKEND QUE ES UPDATE
+      
+      // ✅ ENVIAR IDs en lugar de nombres
+      formData.append('brand_id', brand.id);
+      formData.append('campaign_id', campaign.id);
+      formData.append('city_id', city.id);
+      formData.append('ooh_type_id', oohType.id);
+      formData.append('provider_id', provider.id);
+      
+      // ✅ CAMPOS COMUNES (sin nombres)
       formData.append('direccion', editData.direccion);
-      formData.append('ciudad', editData.ciudad);
-      formData.append('region', editData.region);
       formData.append('latitud', editData.latitud);
       formData.append('longitud', editData.longitud);
       formData.append('fechaInicio', editData.fechaInicio);
       formData.append('fechaFin', editData.fechaFin);
-      formData.append('tipoOOH', editData.tipoOOH);
 
       // Agregar nuevas imágenes si se seleccionaron (por slot)
       const slots = Object.keys(imageReplacements);
       if (slots.length > 0) {
+        console.log(`🖼️ [ACTUALIZAR] Reemplazando ${slots.length} imagen(es) en slots:`, slots);
         formData.append('imageIndexes', slots.join(',')); // slots en base 1
         slots.forEach(slot => {
           formData.append('imagenes', imageReplacements[slot]);
         });
+      } else {
+        console.log('🖼️ [ACTUALIZAR] Sin cambios de imágenes');
       }
 
+      console.log('📤 [ACTUALIZAR] Enviando a POST /api/ooh/create con existingId...');
       const response = await axios.post('http://localhost:8080/api/ooh/create', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -284,6 +517,7 @@ const OOHList = () => {
       });
       
       if (response.data.success) {
+        console.log('✅ [ACTUALIZAR] Registro actualizado exitosamente:', response.data);
         alert('✅ Registro actualizado correctamente');
         setEditMode(false);
         fetchRecords(); // Recargar datos
@@ -346,15 +580,33 @@ const OOHList = () => {
     );
   }
 
-  const displayData = filteredData.length > 0 || searchDireccion || filterMarca || filterCampana || filterFechaInicio || filterFechaFin 
-    ? filteredData 
-    : records;
-
   return (
     <div className="ooh-list-container">
       <div className="list-header">
-        <h2>Registros OOH ({displayData.length} de {records.length})</h2>
+        <h2>Registros OOH ({visibleRecords.length} de {displayData.length})</h2>
         <div className="header-buttons">
+          {selectedCards.size > 0 && (
+            <>
+              <span className="selected-count">
+                {selectedCards.size} seleccionado(s)
+              </span>
+              <button 
+                onClick={toggleSelectAll} 
+                className="btn-secondary"
+                title="Seleccionar/deseleccionar todos"
+              >
+                {areAllVisibleSelected ? '✓ Deseleccionar' : '☐ Seleccionar todo'}
+              </button>
+              <button 
+                onClick={openDeleteConfirmModal} 
+                className="btn-danger"
+                disabled={isDeleting}
+                title="Eliminar registros seleccionados"
+              >
+                🗑️ Eliminar ({selectedCards.size})
+              </button>
+            </>
+          )}
           <button onClick={openReportModal} className="report-btn" title="Generar Reporte PPT de VALLAS">
             📄 Generar Reporte PPT
           </button>
@@ -432,7 +684,7 @@ const OOHList = () => {
         </div>
       ) : (
         <div className="records-grid">
-          {displayData.map((record, index) => {
+          {visibleRecords.map((record, index) => {
             // Extraer datos del objeto (desde BD) o array (legacy)
             const marca = typeof record === 'object' && !Array.isArray(record) ? record.marca : record[2];
             const categoria = typeof record === 'object' && !Array.isArray(record) ? record.categoria : record[3];
@@ -446,14 +698,34 @@ const OOHList = () => {
             const fechaFin = typeof record === 'object' && !Array.isArray(record) ? record.fecha_final : record[15];
             
             const url1 = resolveImageUrl(img1);
+            const isSelected = selectedCards.has(record.id);
+            
             return (
-              <div key={index} className="record-card">
+              <div key={index} className={`record-card ${isSelected ? 'selected' : ''}`} onClick={() => {
+                if (selectedCards.size > 0) {
+                  toggleCardSelection(record.id);
+                }
+              }}>
+                {/* Checkbox de selección */}
+                <div className="card-select-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleCardSelection(record.id);
+                    }}
+                    className="card-checkbox"
+                  />
+                </div>
+
                 {/* Imagen destacada */}
                 <div className="card-image">
                   {url1 ? (
-                      <img 
+                    <LazyImage
                       src={url1}
                       alt={`${marca} - ${campana}`}
+                      placeholder={null}
                       onError={(e) => {
                         e.target.onerror = null;
                         e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="150"%3E%3Crect fill="%23ddd" width="200" height="150"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3ESin imagen%3C/text%3E%3C/svg%3E';
@@ -512,6 +784,13 @@ const OOHList = () => {
         </div>
       )}
 
+      {hasMoreRecords && (
+        <div ref={loadMoreRef} className="load-more-sentinel">
+          <div className="load-more-spinner" />
+          <span>Cargando más registros...</span>
+        </div>
+      )}
+
       {/* Modal de detalles */}
       {showModal && selectedRecord && (
         <div className="modal-overlay" onClick={closeModal}>
@@ -525,8 +804,8 @@ const OOHList = () => {
               {/* Imagen principal */}
               {resolveImageUrl(selectedRecord.imagen_1) && (
                 <div className="modal-image">
-                  <img 
-                    src={resolveImageUrl(selectedRecord.imagen_1)} 
+                  <LazyImage
+                    src={resolveImageUrl(selectedRecord.imagen_1)}
                     alt={`${selectedRecord.marca} - ${selectedRecord.campana}`}
                     onError={(e) => {
                       e.target.onerror = null;
@@ -630,7 +909,7 @@ const OOHList = () => {
                       className="edit-input"
                     />
                   ) : (
-                    <span>{selectedRecord.region}</span>
+                    <span>{selectedRecord.ciudad_region || selectedRecord.region}</span>
                   )}
                 </div>
                 <div className="detail-row">
@@ -717,7 +996,7 @@ const OOHList = () => {
                     <div key={idx} className={`gallery-item ${!item.url ? 'empty' : ''}`}>
                       {item.url ? (
                         <>
-                          <img 
+                          <LazyImage
                             src={resolveImageUrl(item.url)}
                             alt={`Foto ${item.num}`}
                             onError={(e) => {
@@ -884,6 +1163,57 @@ const OOHList = () => {
                 disabled={isDownloading || !reportMonth}
               >
                 {isDownloading ? '⏳ Generando...' : '📥 Generar y Descargar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación de eliminación */}
+      {showDeleteConfirmModal && (
+        <div className="modal-overlay" onClick={closeDeleteConfirmModal}>
+          <div className="modal-content delete-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⚠️ Confirmar eliminación</h2>
+              <button className="modal-close" onClick={closeDeleteConfirmModal}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              <p style={{ marginBottom: '20px', fontSize: '16px' }}>
+                Estás a punto de eliminar <strong>{selectedCards.size} registro(s)</strong>.
+              </p>
+              <p style={{ marginBottom: '20px', color: '#d32f2f', fontWeight: 'bold' }}>
+                ⚠️ Esta acción es irreversible
+              </p>
+              <p style={{ marginBottom: '20px' }}>
+                Para confirmar, escribe <strong>"DEL"</strong> en el campo:
+              </p>
+              
+              <input
+                type="text"
+                placeholder='Escribe "DEL" para confirmar'
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && deleteConfirmText === 'DEL' && confirmDelete()}
+                className="delete-confirm-input"
+                autoFocus
+              />
+            </div>
+
+            <div className="modal-footer">
+              <button 
+                className="modal-btn btn-cancel"
+                onClick={closeDeleteConfirmModal}
+                disabled={isDeleting}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="modal-btn btn-danger"
+                onClick={confirmDelete}
+                disabled={isDeleting || deleteConfirmText.toUpperCase() !== 'DEL'}
+              >
+                {isDeleting ? '⏳ Eliminando...' : '🗑️ Eliminar'}
               </button>
             </div>
           </div>

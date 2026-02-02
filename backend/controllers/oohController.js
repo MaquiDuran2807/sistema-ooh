@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const PptxGenJS = require('pptxgenjs');
 const localStorageService = require('../services/localStorageService');
 const dbService = require('../services/dbService');
+const geoValidationService = require('../services/geoValidationService');
 
 // Utilidades para fechas y texto
 const parseDateSafe = (value) => {
@@ -155,38 +156,120 @@ const getLocalImagePath = (inputPath) => {
 };
 
 const createOOH = async (req, res) => {
-  console.log('\n🔵 [CREATE OOH] Iniciando creación de registro...');
+  // 📊 Detectar si es CREATE o UPDATE
+  const existingId = req.body.existingId || req.body.id;
+  const operationType = existingId ? 'UPDATE' : 'CREATE';
+  const emoji = existingId ? '🔄' : '➕';
+  
+  console.log(`\n${emoji} [${operationType} OOH] Iniciando ${existingId ? 'actualización' : 'creación'} de registro${existingId ? ` ID: ${existingId}` : ''}...`);
+  
   try {
-    // Buscar ID tanto en "id" como en "existingId" (compatibilidad)
-    const existingId = req.body.existingId || req.body.id;
-    const { marca, categoria, proveedor, tipoOOH, campana, direccion, ciudad, region, latitud, longitud, fechaInicio, fechaFin } = req.body;
-
-    // Normalizar a mayúsculas sostenidas (excepto IDs, fechas, coords)
-    const MARCA = (marca || '').toUpperCase();
-    const CATEGORIA = (categoria || '').toUpperCase();
-    const PROVEEDOR = (proveedor || '').toUpperCase();
-    const TIPO_OOH = (tipoOOH || '').toUpperCase();
-    const CAMPANA = (campana || '').toUpperCase();
-    const DIRECCION = (direccion || '').toUpperCase();
-    const CIUDAD = (ciudad || '').toUpperCase();
-    const REGION = (region || '').toUpperCase();
+    // 📊 NUEVA ARQUITECTURA: Aceptar IDs en lugar de nombres
     
+    // ✅ NUEVOS CAMPOS: Recibir IDs en lugar de nombres
+    const { 
+      brand_id, campaign_id, ooh_type_id, provider_id, city_id,  // ✅ IDs
+      direccion, latitud, longitud, fechaInicio, fechaFin       // campos comunes
+    } = req.body;
+    
+    // 🔄 COMPATIBILIDAD: Si vienen nombres (backend antiguo), rechazar
+    const { marca, categoria, proveedor, tipoOOH, campana, ciudad, region } = req.body;
+    
+    if (marca || categoria || proveedor || tipoOOH || campana || ciudad || region) {
+      console.log(`⚠️ [${operationType}] ADVERTENCIA: Se recibieron campos con nombres en lugar de IDs`);
+      console.log(`📝 [${operationType}] Campos recibidos (nombres - DEPRECATED):`, { marca, categoria, proveedor, tipoOOH, campana, ciudad, region });
+      return res.status(400).json({
+        error: 'Arquitectura actualizada: Enviar IDs en lugar de nombres',
+        requiredFields: {
+          brand_id: 'Integer - ID de marca',
+          campaign_id: 'Integer - ID de campaña',
+          ooh_type_id: 'Integer - ID de tipo OOH',
+          provider_id: 'Integer - ID de proveedor',
+          city_id: 'Integer - ID de ciudad'
+        },
+        example: {
+          brand_id: 1,
+          campaign_id: 5,
+          ooh_type_id: 3,
+          provider_id: 2,
+          city_id: 15
+        },
+        note: 'Los campos categoria y region se derivarán automáticamente de las relaciones'
+      });
+    }
+
+    // ✅ Validar que se recibieron los IDs requeridos
+    console.log(`📋 [${operationType}] Datos recibidos (IDs):`, { existingId, brand_id, campaign_id, ooh_type_id, provider_id, city_id, direccion, latitud, longitud });
+
+    if (!brand_id || !campaign_id || !ooh_type_id || !provider_id || !city_id || !direccion || !latitud || !longitud || !fechaInicio) {
+      console.log(`❌ [${operationType}] Error: Faltan IDs obligatorios`);
+      return res.status(400).json({
+        error: 'Faltan campos obligatorios',
+        required: ['brand_id', 'campaign_id', 'ooh_type_id', 'provider_id', 'city_id', 'direccion', 'latitud', 'longitud', 'fechaInicio'],
+        received: Object.keys(req.body)
+      });
+    }
+
+    // ✅ Obtener datos relacionados desde BD usando los IDs
+    console.log(`\n📚 [${operationType} - BD LOOKUP] Obteniendo datos relacionados por IDs...`);
+    
+    const brand = await dbService.getBrandById(brand_id);
+    const campaign = await dbService.getCampaignById(campaign_id);
+    const oohType = await dbService.getOOHTypeById(ooh_type_id);
+    const provider = await dbService.getProviderById(provider_id);
+    const city = await dbService.getCityById(city_id);
+
+    // ✅ Validar que todos los IDs existan
+    if (!brand) {
+      return res.status(400).json({ error: `Marca no encontrada con ID: ${brand_id}` });
+    }
+    if (!campaign) {
+      return res.status(400).json({ error: `Campaña no encontrada con ID: ${campaign_id}` });
+    }
+    if (!oohType) {
+      return res.status(400).json({ error: `Tipo OOH no encontrado con ID: ${ooh_type_id}` });
+    }
+    if (!provider) {
+      return res.status(400).json({ error: `Proveedor no encontrado con ID: ${provider_id}` });
+    }
+    if (!city) {
+      return res.status(400).json({ error: `Ciudad no encontrada con ID: ${city_id}` });
+    }
+
+    console.log('✅ Todos los IDs validados en BD');
+    console.log(`   • Brand: ${brand.nombre} (id=${brand_id})`);
+    console.log(`   • Campaign: ${campaign.nombre} (id=${campaign_id})`);
+    console.log(`   • Type: ${oohType.nombre} (id=${ooh_type_id})`);
+    console.log(`   • Provider: ${provider.nombre} (id=${provider_id})`);
+    console.log(`   • City: ${city.nombre} (id=${city_id})`);
+
+    // ✅ AUTO-COMPUTAR: Derivar category_id desde brand.category_id
+    const category_id = brand.category_id;
+    console.log(`✅ AUTO-COMPUTAR category_id=${category_id} desde brand.category_id`);
+
+    // ✅ AUTO-COMPUTAR: Derivar region_id desde city.region_id
+    const region_id = city.region_id;
+    console.log(`✅ AUTO-COMPUTAR region_id=${region_id} desde city.region_id`);
+
     // Normalizar fechas a formato ISO (yyyy-MM-dd)
     const FECHA_INICIO = normalizeDateToISO(fechaInicio);
     const FECHA_FIN = normalizeDateToISO(fechaFin);
 
-    console.log('📋 Datos recibidos:', { existingId, marca, categoria, proveedor, tipoOOH, campana, direccion, ciudad, region, latitud, longitud, fechaInicio, fechaFin });
     console.log('📅 Fechas normalizadas:', { FECHA_INICIO, FECHA_FIN });
     console.log('📸 Archivos recibidos:', req.files ? req.files.length : 0);
-    console.log('🔑 Todos los campos del body:', Object.keys(req.body));
 
-    // Validar campos obligatorios
-    if (!marca || !categoria || !proveedor || !tipoOOH || !campana || !direccion || !ciudad || !region || !latitud || !longitud || !FECHA_INICIO) {
-      console.log('❌ Error: Faltan campos obligatorios');
+    // 🌍 VALIDACIÓN GEOGRÁFICA: Verificar que las coordenadas correspondan a la ciudad
+    console.log('\n📍 [VALIDACIÓN GEO] Verificando que coordenadas correspondan a la ciudad...');
+    const geoValidation = await geoValidationService.validarCoordenadasPorCiudad(city.nombre, latitud, longitud);
+    
+    if (!geoValidation.valido) {
+      console.log(`❌ [VALIDACIÓN GEO] ${geoValidation.mensaje}`);
       return res.status(400).json({
-        error: 'Faltan campos obligatorios: marca, categoría, proveedor, tipoOOH, campaña, dirección, ciudad, región, latitud, longitud, fechaInicio'
+        error: geoValidation.mensaje,
+        detalles: 'Las coordenadas (latitud, longitud) deben corresponder a la ciudad indicada. Verifica que no haya confusión de ubicaciones.'
       });
     }
+    console.log(`✅ [VALIDACIÓN GEO] ${geoValidation.mensaje}`);
 
     // Si es una actualización (tiene ID), las imágenes son opcionales
     const isUpdate = !!existingId;
@@ -199,11 +282,11 @@ const createOOH = async (req, res) => {
           .filter(v => v >= 0 && v < 3)
       : [];
     
-    // Validar imágenes solo si es creación nueva
-    if (!isUpdate && (!req.files || req.files.length !== 3)) {
-      console.log('❌ Error: No se recibieron 3 imágenes para registro nuevo');
+    // Validar que haya al menos 1 imagen para registros nuevos
+    if (!isUpdate && (!req.files || req.files.length === 0)) {
+      console.log('❌ Error: No se recibió ninguna imagen para registro nuevo');
       return res.status(400).json({
-        error: 'Debes subir exactamente 3 imágenes para un nuevo registro'
+        error: '⚠️ Debes subir al menos 1 imagen para un nuevo registro. Se recomienda subir 3 imágenes.'
       });
     }
 
@@ -213,7 +296,8 @@ const createOOH = async (req, res) => {
     if (existingId) {
       existing = await dbService.findExistingById(existingId);
     } else {
-      existing = await dbService.findExisting(DIRECCION, FECHA_INICIO, MARCA, CAMPANA);
+      // NOTA: Con la nueva arquitectura ID-based, buscar duplicados por dirección + ciudad + marca + fecha
+      existing = await dbService.findExisting(direccion.toUpperCase(), FECHA_INICIO, brand.nombre, campaign.nombre);
     }
     
     const existingCSV = existing ? { lineIndex: 0, values: existing } : { lineIndex: -1, values: null };
@@ -242,9 +326,9 @@ const createOOH = async (req, res) => {
         console.log('📤 Subiendo nuevas imágenes (reemplazo parcial)...');
         const uploadedUrls = await localStorageService.uploadToLocal(req.files, {
           id,
-          marca: MARCA,
-          campana: CAMPANA,
-          direccion: DIRECCION,
+          marca: brand.nombre,
+          campana: campaign.nombre,
+          direccion: direccion.toUpperCase(),
           fechaInicio: FECHA_INICIO
         });
 
@@ -270,9 +354,9 @@ const createOOH = async (req, res) => {
       console.log('📤 Subiendo imágenes...');
       imageUrls = await localStorageService.uploadToLocal(req.files, {
         id,
-        marca: MARCA,
-        campana: CAMPANA,
-        direccion: DIRECCION,
+        marca: brand.nombre,
+        campana: campaign.nombre,
+        direccion: direccion.toUpperCase(),
         fechaInicio: FECHA_INICIO
       });
     }
@@ -282,29 +366,40 @@ const createOOH = async (req, res) => {
     console.log('📊 Imagen 1:', imageUrls[1] ? imageUrls[1].substring(0, 80) : 'vacía');
     console.log('📊 Imagen 2:', imageUrls[2] ? imageUrls[2].substring(0, 80) : 'vacía');
     
+    // ✅ CONSTRUIR oohData CON ARQUITECTURA ID-BASED
     const oohData = {
       id,
-      marca: MARCA,
-      categoria: CATEGORIA,
-      proveedor: PROVEEDOR,
-      tipoOOH: TIPO_OOH,
-      campana: CAMPANA,
-      direccion: DIRECCION,
-      ciudad: CIUDAD,
-      region: REGION,
+      // ✅ NUEVOS CAMPOS: IDs en lugar de nombres
+      brand_id: brand_id,
+      campaign_id: campaign_id,
+      ooh_type_id: ooh_type_id,
+      provider_id: provider_id,
+      city_id: city_id,
+      category_id: category_id,          // ✅ AUTO-COMPUTADO
+      region_id: region_id,               // ✅ AUTO-COMPUTADO
+      // Datos locales para búsqueda rápida (denormalizados)
+      marca: brand.nombre,
+      campana: campaign.nombre,
+      tipoOOH: oohType.nombre,
+      proveedor: provider.nombre,
+      ciudad: city.nombre,
+      // Información geográfica
       latitud: parseFloat(latitud),
       longitud: parseFloat(longitud),
+      // Imágenes
       imagenes: imageUrls,
+      // Fechas
       fechaInicio: FECHA_INICIO,
       fechaFin: FECHA_FIN || (existingCSV.values ? existingCSV.values.fecha_final : null),
+      direccion: direccion.toUpperCase(),
       fechaCreacion: new Date().toISOString()
     };
 
     // Actualizar o agregar según corresponda
     if (existingCSV.values) {
-      console.log('💾 Actualizando registro en base de datos...');
+      console.log(`💾 [UPDATE] Actualizando registro existente ID: ${id}...`);
       await dbService.updateRecord(id, oohData);
-      console.log('✅ Registro actualizado exitosamente');
+      console.log(`✅ [UPDATE] Registro actualizado exitosamente - ID: ${id}`);
       res.status(200).json({
         success: true,
         message: 'Registro actualizado exitosamente',
@@ -312,9 +407,9 @@ const createOOH = async (req, res) => {
         updated: true
       });
     } else {
-      console.log('💾 Guardando nuevo registro en base de datos...');
+      console.log('💾 [CREATE] Guardando nuevo registro en base de datos...');
       await dbService.addRecord(oohData);
-      console.log('✅ Registro creado exitosamente');
+      console.log(`✅ [CREATE] Registro creado exitosamente - ID: ${oohData.id}`);
       res.status(201).json({
         success: true,
         message: 'Registro creado exitosamente',
@@ -323,28 +418,49 @@ const createOOH = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('❌ Error en createOOH:', error);
+    console.error(`❌ [${operationType}] Error en createOOH:`, error);
     console.error('Stack:', error.stack);
     res.status(500).json({
-      error: 'Error al crear el registro',
+      error: `Error al ${existingId ? 'actualizar' : 'crear'} el registro`,
       details: error.message
     });
   }
 };
 
 const getAllOOH = async (req, res) => {
-  console.log('\n🔵 [GET ALL OOH] Obteniendo todos los registros...');
+  console.log('\n🔵 [GET ALL OOH] Obteniendo registros...');
   try {
-    // Leer de la base de datos
-    const records = await dbService.getAllRecords();
-    console.log(`✅ Registros obtenidos de la BD: ${records.length}`);
+    // Paginación: page (default 1), limit (default 50)
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+    
+    console.log(`📄 Paginación: page=${page}, limit=${limit}, offset=${offset}`);
+    
+    // Leer todos los registros de la BD
+    const allRecords = await dbService.getAllRecords();
+    const total = allRecords.length;
+    
+    // Aplicar paginación en memoria
+    const records = allRecords.slice(offset, offset + limit);
+    
+    console.log(`✅ Total registros: ${total}, enviando: ${records.length} (página ${page})`);
+    
     if (records.length > 0) {
       console.log('📸 Ejemplo imagen_1:', records[0].imagen_1);
       console.log('📸 Ejemplo imagen_2:', records[0].imagen_2);
     }
+    
     res.json({
       success: true,
-      data: records
+      data: records,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasMore: offset + records.length < total
+      }
     });
   } catch (error) {
     console.error('❌ Error en getAllOOH:', error);
@@ -784,15 +900,532 @@ const createOOHType = async (req, res) => {
   }
 };
 
+// Obtener todas las ciudades
+const getAllCities = async (req, res) => {
+  try {
+    const cities = dbService.getAllCities();
+    return res.status(200).json({ 
+      success: true, 
+      data: cities,
+      count: cities.length 
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo ciudades:', error);
+    return res.status(500).json({ error: 'Error obteniendo ciudades' });
+  }
+};
+
+// Obtener ciudades por región
+const getCitiesByRegion = async (req, res) => {
+  try {
+    const { region } = req.params;
+    if (!region) {
+      return res.status(400).json({ error: 'Región requerida' });
+    }
+    const cities = dbService.getCitiesByRegion(region);
+    return res.status(200).json({ 
+      success: true, 
+      data: cities,
+      region,
+      count: cities.length 
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo ciudades por región:', error);
+    return res.status(500).json({ error: 'Error obteniendo ciudades por región' });
+  }
+};
+
+// Obtener ciudad por nombre
+const getCityByName = async (req, res) => {
+  try {
+    const { nombre } = req.params;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre de ciudad requerido' });
+    }
+    const city = dbService.getCityByName(nombre);
+    if (!city) {
+      return res.status(404).json({ error: 'Ciudad no encontrada' });
+    }
+    return res.status(200).json({ 
+      success: true, 
+      data: city
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo ciudad:', error);
+    return res.status(500).json({ error: 'Error obteniendo ciudad' });
+  }
+};
+
+// Validar nombre de ciudad (detectar duplicados con variaciones)
+const validateCityName = async (req, res) => {
+  try {
+    const { ciudad } = req.body;
+    
+    if (!ciudad) {
+      return res.status(400).json({ 
+        error: 'Nombre de ciudad requerido',
+        valid: false
+      });
+    }
+
+    // Validar el nombre
+    const validation = dbService.validateCityName(ciudad);
+    
+    if (!validation.isValid) {
+      console.log(`⚠️ [VALIDACIÓN CIUDAD] Duplicado detectado: ${validation.message}`);
+      
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: '🚫 Nombre de ciudad duplicado o variación existente',
+        message: validation.message,
+        ciudadIntentada: ciudad,
+        normalizado: validation.normalized,
+        ciudadExistente: validation.duplicate ? validation.duplicate.nombre : null,
+        regionExistente: validation.duplicate ? validation.duplicate.region : null,
+        detalles: {
+          sugerencia: 'Esta ciudad ya existe en el sistema con un nombre similar. Usa el nombre exacto de la ciudad existente.'
+        }
+      });
+    }
+
+    // Si es válido, devolver confirmación
+    console.log(`✅ [VALIDACIÓN CIUDAD] ${validation.message}`);
+    
+    return res.status(200).json({
+      success: true,
+      valid: true,
+      message: validation.message,
+      ciudadIntentada: ciudad,
+      normalizado: validation.normalized
+    });
+    
+  } catch (error) {
+    console.error('❌ Error validando ciudad:', error);
+    return res.status(500).json({ 
+      error: 'Error validando ciudad',
+      valid: false 
+    });
+  }
+};
+
+// Inicializar app - cargar todos los datos maestros
+const initializeApp = (req, res) => {
+  try {
+    const db = dbService.getDatabase();
+    
+    // Cargar marcas
+    const brandsStmt = db.prepare('SELECT b.id, b.nombre, c.nombre as categoria, a.nombre as anunciante, b.category_id, b.advertiser_id FROM brands b JOIN categories c ON b.category_id = c.id JOIN advertisers a ON b.advertiser_id = a.id ORDER BY b.nombre');
+    const brands = [];
+    while (brandsStmt.step()) {
+      brands.push(brandsStmt.getAsObject());
+    }
+    brandsStmt.free();
+    
+    // Cargar campañas
+    const campaignsStmt = db.prepare('SELECT c.id, c.nombre, c.brand_id, b.nombre as marca FROM campaigns c JOIN brands b ON c.brand_id = b.id ORDER BY c.nombre');
+    const campaigns = [];
+    while (campaignsStmt.step()) {
+      campaigns.push(campaignsStmt.getAsObject());
+    }
+    campaignsStmt.free();
+    
+    // Cargar categorías
+    const categoriesStmt = db.prepare('SELECT id, nombre FROM categories ORDER BY nombre');
+    const categories = [];
+    while (categoriesStmt.step()) {
+      categories.push(categoriesStmt.getAsObject());
+    }
+    categoriesStmt.free();
+    
+    // Cargar anunciantes
+    const advertisersStmt = db.prepare('SELECT id, nombre FROM advertisers ORDER BY nombre');
+    const advertisers = [];
+    while (advertisersStmt.step()) {
+      advertisers.push(advertisersStmt.getAsObject());
+    }
+    advertisersStmt.free();
+    
+    // Cargar tipos OOH
+    const typesStmt = db.prepare('SELECT id, nombre FROM ooh_types ORDER BY nombre');
+    const oohTypes = [];
+    while (typesStmt.step()) {
+      oohTypes.push(typesStmt.getAsObject());
+    }
+    typesStmt.free();
+    
+    // Cargar ciudades
+    const citiesStmt = db.prepare('SELECT c.id, c.nombre, c.latitud, c.longitud, c.radio_km, r.nombre as region FROM cities c JOIN regions r ON c.region_id = r.id ORDER BY c.nombre');
+    const cities = [];
+    while (citiesStmt.step()) {
+      cities.push(citiesStmt.getAsObject());
+    }
+    citiesStmt.free();
+    
+    // Cargar direcciones
+    const addressesStmt = db.prepare('SELECT a.id, a.city_id, a.descripcion, a.latitud, a.longitud, c.nombre as ciudad FROM addresses a JOIN cities c ON a.city_id = c.id ORDER BY c.nombre, a.descripcion');
+    const addresses = [];
+    while (addressesStmt.step()) {
+      addresses.push(addressesStmt.getAsObject());
+    }
+    addressesStmt.free();
+    
+    // Cargar proveedores
+    const providersStmt = db.prepare('SELECT id, nombre FROM providers ORDER BY nombre');
+    const providers = [];
+    while (providersStmt.step()) {
+      providers.push(providersStmt.getAsObject());
+    }
+    providersStmt.free();
+    
+    // Cargar regiones
+    const regionsStmt = db.prepare('SELECT id, nombre FROM regions ORDER BY nombre');
+    const regions = [];
+    while (regionsStmt.step()) {
+      regions.push(regionsStmt.getAsObject());
+    }
+    regionsStmt.free();
+    
+    // Cargar registros OOH
+    const recordsStmt = db.prepare('SELECT o.id, o.brand_id, o.campaign_id, o.ooh_type_id, o.address_id, o.provider_id, o.fecha_inicio, o.fecha_final, b.nombre as marca, c.nombre as campana, t.nombre as tipo FROM ooh_records o JOIN brands b ON o.brand_id = b.id JOIN campaigns c ON o.campaign_id = c.id JOIN ooh_types t ON o.ooh_type_id = t.id ORDER BY o.fecha_inicio DESC');
+    const records = [];
+    while (recordsStmt.step()) {
+      records.push(recordsStmt.getAsObject());
+    }
+    recordsStmt.free();
+    
+    const responseData = {
+      success: true,
+      data: {
+        brands,
+        campaigns,
+        categories,
+        advertisers,
+        oohTypes,
+        cities,
+        addresses,
+        providers,
+        regions,
+        records
+      }
+    };
+    
+    // Calcular tamaño de la respuesta
+    const jsonString = JSON.stringify(responseData);
+    const sizeInBytes = Buffer.byteLength(jsonString, 'utf8');
+    const sizeInKB = (sizeInBytes / 1024).toFixed(2);
+    const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
+    
+    console.log('📊 TAMAÑO DE RESPUESTA /initialize:');
+    console.log(`   Bytes: ${sizeInBytes}`);
+    console.log(`   KB: ${sizeInKB}`);
+    console.log(`   MB: ${sizeInMB}`);
+    console.log(`   Breakdown:`);
+    console.log(`   - Brands (${brands.length}): ${(JSON.stringify(brands).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Campaigns (${campaigns.length}): ${(JSON.stringify(campaigns).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Categories (${categories.length}): ${(JSON.stringify(categories).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Advertisers (${advertisers.length}): ${(JSON.stringify(advertisers).length / 1024).toFixed(2)} KB`);
+    console.log(`   - OOH Types (${oohTypes.length}): ${(JSON.stringify(oohTypes).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Cities (${cities.length}): ${(JSON.stringify(cities).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Addresses (${addresses.length}): ${(JSON.stringify(addresses).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Providers (${providers.length}): ${(JSON.stringify(providers).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Regions (${regions.length}): ${(JSON.stringify(regions).length / 1024).toFixed(2)} KB`);
+    console.log(`   - Records (${records.length}): ${(JSON.stringify(records).length / 1024).toFixed(2)} KB`);
+    
+    res.json(responseData);
+  } catch (error) {
+    console.error('Error en initializeApp:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Crear nueva ciudad
+const createCity = async (req, res) => {
+  try {
+    const { nombre, region } = req.body;
+    
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ 
+        error: 'Nombre de ciudad requerido',
+        valid: false
+      });
+    }
+    
+    if (!region || !region.trim()) {
+      return res.status(400).json({ 
+        error: 'Región requerida',
+        valid: false
+      });
+    }
+    
+    const CIUDAD = nombre.toUpperCase();
+    const REGION = region.toUpperCase();
+    
+    // Validar si la ciudad ya existe
+    const validation = dbService.validateCityName(CIUDAD);
+    if (!validation.isValid) {
+      console.log(`⚠️ [CREATE CITY] Duplicado detectado: ${validation.message}`);
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: '🚫 Nombre de ciudad duplicado o variación existente',
+        message: validation.message,
+        ciudadIntentada: CIUDAD,
+        normalizado: validation.normalized,
+        ciudadExistente: validation.duplicate ? validation.duplicate.nombre : null,
+        regionExistente: validation.duplicate ? validation.duplicate.region : null
+      });
+    }
+    
+    // Crear la ciudad en BD
+    const newCity = dbService.addCity(CIUDAD, REGION);
+    
+    console.log(`✅ [CREATE CITY] Ciudad creada: ${CIUDAD} en región ${REGION}`);
+    return res.status(201).json({
+      success: true,
+      valid: true,
+      message: `Ciudad "${CIUDAD}" creada exitosamente en región "${REGION}"`,
+      data: newCity
+    });
+    
+  } catch (error) {
+    console.error('❌ Error creando ciudad:', error);
+    return res.status(500).json({ 
+      error: 'Error al crear la ciudad',
+      details: error.message
+    });
+  }
+};
+
+// Obtener marca por nombre (para mapeo frontend)
+const getBrandByName = async (req, res) => {
+  try {
+    const { nombre } = req.query;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre de marca requerido' });
+    }
+    const brand = dbService.getBrandByName(nombre);
+    if (!brand) {
+      return res.status(404).json({ error: 'Marca no encontrada' });
+    }
+    return res.status(200).json(brand);
+  } catch (error) {
+    console.error('❌ Error obteniendo marca:', error);
+    return res.status(500).json({ error: 'Error obteniendo marca' });
+  }
+};
+
+// Obtener tipo OOH por nombre (para mapeo frontend)
+const getOOHTypeByName = async (req, res) => {
+  try {
+    const { nombre } = req.query;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre de tipo OOH requerido' });
+    }
+    const oohType = dbService.getOOHTypeByName(nombre);
+    if (!oohType) {
+      return res.status(404).json({ error: 'Tipo OOH no encontrado' });
+    }
+    return res.status(200).json(oohType);
+  } catch (error) {
+    console.error('❌ Error obteniendo tipo OOH:', error);
+    return res.status(500).json({ error: 'Error obteniendo tipo OOH' });
+  }
+};
+
+// Obtener todos los proveedores
+const getAllProviders = async (req, res) => {
+  try {
+    const providers = dbService.getAllProviders();
+    return res.status(200).json(providers);
+  } catch (error) {
+    console.error('❌ Error obteniendo proveedores:', error);
+    return res.status(500).json({ error: 'Error obteniendo proveedores' });
+  }
+};
+
+// Obtener proveedor por nombre (para mapeo frontend)
+const getProviderByName = async (req, res) => {
+  try {
+    const { nombre } = req.query;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre de proveedor requerido' });
+    }
+    const provider = dbService.getProviderByName(nombre);
+    if (!provider) {
+      return res.status(404).json({ error: 'Proveedor no encontrado' });
+    }
+    return res.status(200).json(provider);
+  } catch (error) {
+    console.error('❌ Error obteniendo proveedor:', error);
+    return res.status(500).json({ error: 'Error obteniendo proveedor' });
+  }
+};
+
+// Obtener todas las campañas
+const getAllCampaigns = async (req, res) => {
+  try {
+    const campaigns = dbService.getAllCampaigns();
+    return res.status(200).json(campaigns);
+  } catch (error) {
+    console.error('❌ Error obteniendo campañas:', error);
+    return res.status(500).json({ error: 'Error obteniendo campañas' });
+  }
+};
+
+// Obtener campaña por nombre (para mapeo frontend)
+const getCampaignByName = async (req, res) => {
+  try {
+    const { nombre } = req.query;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre de campaña requerido' });
+    }
+    const campaign = dbService.getCampaignByName(nombre);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaña no encontrada' });
+    }
+    return res.status(200).json(campaign);
+  } catch (error) {
+    console.error('❌ Error obteniendo campaña:', error);
+    return res.status(500).json({ error: 'Error obteniendo campaña' });
+  }
+};
+
+// Eliminar registro OOH
+const deleteOOH = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'ID del registro requerido' });
+    }
+
+    console.log(`\n🗑️  [DELETE OOH] Eliminando registro: ${id}`);
+
+    // Usar la función completa de eliminación del dbService
+    const result = dbService.deleteOOHRecord(id);
+
+    if (!result.success) {
+      console.error('❌ Error eliminando registro:', result.error);
+      return res.status(400).json({ 
+        error: result.error,
+        success: false 
+      });
+    }
+
+    console.log(`✅ Eliminación completada`);
+    
+    return res.status(200).json(result);
+
+  } catch (error) {
+    console.error('❌ Error en deleteOOH:', error);
+    return res.status(500).json({ 
+      error: 'Error eliminando registro',
+      detail: error.message 
+    });
+  }
+};
+
+// Crear nueva dirección
+const createAddress = async (req, res) => {
+  try {
+    const { city_id, descripcion, latitud, longitud } = req.body;
+    
+    console.log('📍 [CREATE ADDRESS] Creando dirección:', { city_id, descripcion, latitud, longitud });
+    
+    if (!city_id || !descripcion || !latitud || !longitud) {
+      return res.status(400).json({ 
+        error: 'Faltan campos obligatorios',
+        required: ['city_id', 'descripcion', 'latitud', 'longitud']
+      });
+    }
+    
+    // Verificar que la ciudad existe
+    const city = await dbService.getCityById(city_id);
+    if (!city) {
+      return res.status(400).json({ error: `Ciudad no encontrada con ID: ${city_id}` });
+    }
+    
+    // Validar coordenadas contra ciudad
+    const validation = await geoValidationService.validarCoordenadasPorCiudad(
+      city.nombre,
+      parseFloat(latitud), 
+      parseFloat(longitud)
+    );
+    
+    if (!validation.valido) {
+      return res.status(400).json({ 
+        error: 'Coordenadas fuera del rango de la ciudad',
+        details: validation.mensaje
+      });
+    }
+    
+    // Crear dirección en BD
+    const db = dbService.getDatabase();
+    const insertStmt = db.prepare(
+      'INSERT INTO addresses (city_id, descripcion, latitud, longitud) VALUES (?, ?, ?, ?)'
+    );
+    insertStmt.run([city_id, descripcion, latitud, longitud]);
+    insertStmt.free();
+    
+    // Obtener el ID insertado
+    const lastIdStmt = db.prepare('SELECT last_insert_rowid() as id');
+    lastIdStmt.step();
+    const newId = lastIdStmt.getAsObject().id;
+    lastIdStmt.free();
+    
+    // Guardar BD
+    await dbService.saveDB();
+    
+    const newAddress = {
+      id: newId,
+      city_id,
+      ciudad: city.nombre,
+      descripcion,
+      latitud,
+      longitud
+    };
+    
+    console.log('✅ [CREATE ADDRESS] Dirección creada:', newAddress);
+    
+    return res.status(201).json({
+      success: true,
+      message: 'Dirección creada exitosamente',
+      data: newAddress
+    });
+    
+  } catch (error) {
+    console.error('❌ Error creando dirección:', error);
+    return res.status(500).json({ 
+      error: 'Error creando dirección',
+      details: error.message 
+    });
+  }
+};
+
 module.exports = {
+  initializeApp,
   createOOH,
   getAllOOH,
   getOOHById,
   generateReport,
   getAllBrands,
+  getBrandByName,
   getCampaignsByBrand,
   getAllOOHTypes,
+  getOOHTypeByName,
+  getAllProviders,
+  getProviderByName,
+  getAllCampaigns,
+  getCampaignByName,
   createBrand,
   createCampaign,
-  createOOHType
+  createOOHType,
+  getAllCities,
+  getCitiesByRegion,
+  getCityByName,
+  createCity,
+  validateCityName,
+  createAddress,
+  deleteOOH
 };

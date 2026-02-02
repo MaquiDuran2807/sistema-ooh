@@ -1,250 +1,362 @@
-# OOH Advertising Management System
+# 🎯 Sistema de Gestión OOH - Vallas Publicitarias Colombia
 
-Sistema local de gestión de publicidad OOH con frontend React, backend Node.js/Express y base de datos SQLite en memoria (sql.js) respaldada en disco, más almacenamiento local de imágenes.
+Sistema integral para gestionar vallas publicitarias (Out of Home) con arquitectura ID-based, validación geográfica, lazy loading y generación automática de reportes PPT.
 
-## 🚀 Características
+---
 
-- ✅ **Formulario React** con Context API para compartir estado
-- ✅ **API Node.js/Express** con subida y validación de imágenes
-- ✅ **SQLite (sql.js)** con tablas relacionales (`brands`, `campaigns`, `ooh_types`, `ooh_records`)
-- ✅ **Imágenes hash** guardadas en `backend/local-images/`
-- ✅ **Scripts de arranque** para levantar backend y frontend en consolas separadas
+## 📋 Características Principales
 
-## 📋 Campos del Formulario
+### ✨ Frontend (React + Context API)
+- **Carga incremental**: Scroll infinito con Intersection Observer (48 registros iniciales)
+- **Lazy loading de imágenes**: Solo carga imágenes visibles (prefetch 300px)
+- **Arquitectura ID-based**: Usa IDs en lugar de nombres para relaciones
+- **Auto-completado inteligente**: Al seleccionar dirección, llena ciudad/región/coordenadas
+- **Validación en tiempo real**: Coordenadas validadas contra radio de ciudad
+- **Gestión de direcciones**: Crea y reutiliza direcciones guardadas
 
-- **Marca**
-- **Campaña**
-- **Tipo OOH** (según catálogo `ooh_types`)
-- **Dirección**
-- **3 Imágenes** (máx 5MB c/u)
-- **Fecha de Vigencia**
+### 🔧 Backend (Node.js + Express + SQLite)
+- **Base de datos normalizada**: 11 tablas con relaciones ID-based
+- **Paginación**: `?page=1&limit=50` para optimizar carga
+- **Validación geográfica**: geolib + radio por ciudad (ej: Bogotá 45km)
+- **Generación PPT**: Python script con plantilla base
+- **34 ciudades colombianas**: Con coordenadas y radio de cobertura
+- **Storage local**: Imágenes organizadas por marca/campaña/mes
 
-## 🏗️ Estructura del Proyecto
+---
+
+## 🚀 Inicio Rápido
+
+### Requisitos
+- Node.js 18+
+- Python 3.8+ (para reportes PPT)
+- npm o yarn
+
+### Instalación
+
+```bash
+# 1. Instalar dependencias
+cd frontend && npm install
+cd ../backend && npm install
+pip install python-pptx
+
+# 2. Inicializar base de datos
+cd backend
+node create-database.js
+
+# 3. Iniciar servicios
+# Terminal 1 - Backend
+cd backend && npm start
+
+# Terminal 2 - Frontend  
+cd frontend && npm start
+```
+
+Acceso: **http://localhost:3000**
+
+---
+
+## 📁 Estructura del Proyecto
 
 ```
-nuevo ooh/
+nuevo-ooh/
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── OOHForm.js              # Formulario con auto-fill
+│   │   │   ├── OOHList.js              # Grid con lazy load + IntersectionObserver
+│   │   │   ├── AddDireccionModal.js    # Modal con validación geo + bounds
+│   │   │   ├── AddCiudadModal.js       # Agregar ciudades
+│   │   │   └── [otros modals...]
+│   │   ├── context/
+│   │   │   └── AppContext.js           # Estado global (brands, cities, records)
+│   │   └── services/
+│   │       └── dbService.js            # Mapeo nombre→ID usando AppContext
+│   └── package.json
+│
 ├── backend/
 │   ├── controllers/
+│   │   └── oohController.js            # 18 endpoints (create, update, delete)
 │   ├── routes/
+│   │   └── ooh.js                      # Rutas API
 │   ├── services/
-│   ├── local-images/        # Carpeta de imágenes guardadas (hash)
-│   └── start-dev.bat        # Instala deps, migra CSV y corre en dev
-├── frontend/
-│   └── start-frontend.bat   # Levanta React en localhost:3000
-└── start-all.bat            # Levanta backend + frontend y abre el navegador
+│   │   ├── dbService.js                # SQLite (11 tablas normalizadas)
+│   │   ├── geoValidationService.js     # Validación coordenadas con geolib
+│   │   ├── localStorageService.js      # Gestión de imágenes local
+│   │   └── pptService.js               # Generación PPT
+│   ├── utils/
+│   │   └── ciudadesCoordinates.js      # 34 ciudades con lat/lng/radio
+│   ├── __tests__/
+│   │   ├── addresses-create.test.js    # Tests endpoint direcciones
+│   │   ├── create-edit-complete.test.js # Tests CRUD completo
+│   │   ├── geo-validation.test.js      # Tests validación geográfica
+│   │   ├── images.test.js              # Tests imágenes
+│   │   └── cities-integration.test.js  # Tests ciudades
+│   ├── ooh_data.db                     # Base de datos SQLite
+│   └── package.json
+│
+├── README.md                           # Este archivo
+└── TESTS_GUIDE.md                      # Guía de tests
 ```
 
-## ⚙️ Requisitos
+---
 
-- Node.js 18+ (incluye npm)
-- Windows (scripts `.bat`)
+## 🗄️ Base de Datos (SQLite)
 
-## 🔧 Cómo ejecutar en local
+### Tablas Normalizadas (11 tablas)
 
-Opción rápida (dos consolas + navegador):
+```sql
+-- Maestras
+regions (id, nombre)
+categories (id, nombre)  
+advertisers (id, nombre)
+brands (id, nombre, category_id, advertiser_id)
+campaigns (id, nombre, brand_id)
+ooh_types (id, nombre)
+providers (id, nombre)
+cities (id, nombre, latitud, longitud, radio_km, region_id)
 
-```bash
-start-all.bat
+-- Transaccionales
+addresses (id, city_id, descripcion, latitud, longitud)
+ooh_records (id, brand_id, campaign_id, city_id, ooh_type_id, provider_id, 
+             category_id, region_id, direccion, latitud, longitud, 
+             fecha_inicio, fecha_final, imagen_1, imagen_2, imagen_3)
+images (id, record_id, url, position)
 ```
 
-Esto llama a `backend/start-dev.bat` y `frontend/start-frontend.bat`, y abre http://localhost:3000.
+### Relaciones ID-based
+- `ooh_records.brand_id` → `brands.id`
+- `ooh_records.city_id` → `cities.id`
+- `cities.region_id` → `regions.id`
+- `brands.category_id` → `categories.id`
 
-Ejecución manual:
+---
 
-1) Backend
+## 🔌 API Endpoints
 
-```bash
-cd backend
-start-dev.bat
+### Registros OOH
+```
+GET    /api/ooh/initialize              # Cargar todos los datos maestros
+GET    /api/ooh/all?page=1&limit=50     # Listar registros (paginado)
+GET    /api/ooh/:id                     # Obtener registro por ID
+POST   /api/ooh/create                  # Crear/actualizar registro
+DELETE /api/ooh/:id                     # Eliminar registro
 ```
 
-- Instala dependencias si faltan
-- Migra el CSV inicial a SQLite (tablas `brands`, `campaigns`, `ooh_types`, `ooh_records`)
-- Levanta el servidor en http://localhost:8080
-
-2) Frontend
-
-```bash
-cd frontend
-start-frontend.bat
+### Ciudades
+```
+GET    /api/ooh/cities                  # Todas las ciudades
+GET    /api/ooh/cities/by-name          # Buscar por nombre
+POST   /api/ooh/cities/create           # Crear ciudad
+POST   /api/ooh/cities/validate         # Validar nombre
 ```
 
-- Levanta React en http://localhost:3000 apuntando al backend local
+### Direcciones
+```
+POST   /api/ooh/addresses/create        # Crear dirección con validación geo
+```
+
+### Reportes
+```
+GET    /api/ooh/report/ppt?month=2026-01&useBase=true  # Generar PPT
+```
+
+---
 
 ## 🧪 Tests
 
-### Ejecutar todos los tests a la vez:
+### Backend Tests (Jest + Supertest)
 
-```bash
-start-all-tests.bat
-```
-
-Esto ejecuta:
-1. **Backend Tests** - Jest + Supertest (Node.js)
-2. **Frontend Tests** - React Testing Library
-
-### Tests Individuales
-
-**Backend:**
 ```bash
 cd backend
-start-tests.bat          # Ejecuta tests y cierra
-npm test -- --watch     # Modo watch (desarrollo)
+
+# Ejecutar todos los tests
+npm test
+
+# Tests específicos
+npx jest __tests__/addresses-create.test.js         # Direcciones
+npx jest __tests__/create-edit-complete.test.js     # CRUD completo
+npx jest __tests__/geo-validation.test.js           # Validación geo
+npx jest __tests__/images.test.js                   # Imágenes
+npx jest __tests__/cities-integration.test.js       # Ciudades
 ```
 
-**Frontend:**
+**Cobertura:**
+- ✅ Creación de registros con IDs (no nombres)
+- ✅ Actualización con `existingId` + `imageIndexes`
+- ✅ Validación de coordenadas fuera de rango
+- ✅ Creación de direcciones con validación geo
+- ✅ Gestión de imágenes con hash único
+
+---
+
+## 🎨 Funcionalidades Destacadas
+
+### 1. Carga Incremental con Intersection Observer
+
+```javascript
+// OOHList.js
+const PAGE_SIZE = 48;
+const PREFETCH_MARGIN_PX = 600;
+
+useEffect(() => {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount(prev => Math.min(prev + PAGE_SIZE, displayData.length));
+      }
+    },
+    { rootMargin: `${PREFETCH_MARGIN_PX}px` }
+  );
+  observer.observe(loadMoreRef.current);
+}, []);
+```
+
+### 2. Lazy Loading de Imágenes
+
+```javascript
+const LazyImage = ({ src, alt }) => {
+  const [isVisible, setIsVisible] = useState(false);
+  
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '300px' }
+    );
+    observer.observe(imgRef.current);
+  }, []);
+
+  return <img src={isVisible ? src : undefined} />;
+};
+```
+
+### 3. Auto-fill de Formulario
+
+Al seleccionar una dirección guardada, automáticamente llena ciudad, región, latitud y longitud.
+
+### 4. Validación Geográfica
+
+```javascript
+// geoValidationService.js
+const validarCoordenadasPorCiudad = async (ciudad, latitud, longitud) => {
+  const infoCiudad = dbService.getCityByName(ciudad);
+  const distanciaEnMetros = geolib.getDistance(
+    { latitude: latitud, longitude: longitud },
+    { latitude: infoCiudad.latitud, longitude: infoCiudad.longitud }
+  );
+  
+  if (distanciaEnMetros > infoCiudad.radio_km * 1000) {
+    return {
+      valido: false,
+      mensaje: `Coordenadas a ${distanciaEnKm}km del centro...`
+    };
+  }
+  return { valido: true };
+};
+```
+
+---
+
+## 📊 Generación de Reportes PPT
+
+### Flujo
+1. Usuario selecciona mes en modal
+2. Backend filtra registros por fecha
+3. Llama script Python: `generate_ppt_from_base_v3.py`
+4. Python carga plantilla base y genera slides
+5. Descarga automática: `reporte_vallas_2026-01.pptx`
+
+---
+
+## 🛠️ Scripts Útiles
+
 ```bash
-cd frontend
-npm test                 # Modo watch interactivo
-npm run test             # Ejecuta tests y muestra cobertura
+# Base de datos
+node create-database.js              # Crear BD desde cero
+node check-db.js                     # Inspeccionar BD
+
+# Validación
+node check-images.js                 # Verificar rutas de imágenes
+
+# Migración
+node migrate-csv-to-db.js            # Importar desde CSV
 ```
 
-### Cobertura de Tests
+---
 
-Los tests incluyen:
+## 🐛 Troubleshooting
 
-- **Unitarios**: Componentes individuales (AddMarcaModal, OOHForm, OOHList)
-- **Contexto**: AppContext global y funciones de estado
-- **Integración**: Flujos completos (crear registro → guardar → ver en lista)
-- **Snapshots**: Validar cambios de UI
-- **User Interactions**: Emular clicks, inputs, uploads
-- **API Mocking**: Simular respuestas del backend
+### Error: "Ciudad no encontrada"
+- Usa el modal "Agregar Ciudad" para crearla
 
-### Archivos de Test
+### Error: "Coordenadas fuera del rango"
+- Verifica que latitud/longitud correspondan a la ciudad
+- Radio de validación en `cities.radio_km`
 
-```
-frontend/
-├── src/
-│   ├── __tests__/
-│   │   └── App.integration.test.js        # Tests de flujo completo
-│   ├── components/
-│   │   └── __tests__/
-│   │       ├── AddMarcaModal.test.js      # Modal de agregar marca
-│   │       ├── OOHForm.test.js            # Formulario principal
-│   │       └── OOHList.test.js            # Lista de registros
-│   └── context/
-│       └── __tests__/
-│           └── AppContext.test.js         # Estado global
-└── setupTests.js                           # Configuración Jest
+### Imágenes no se muestran
+- Verifica rutas en `ooh_records.imagen_X`
+- Estructura: `local-images/MARCA/CAMPANA/YYYY-MM/archivo.jpg`
 
-backend/
-├── __tests__/
-│   ├── images.test.js                      # Tests de imágenes
-│   └── database.test.js                    # Tests de base de datos (si existe)
-```
+---
 
-### Comandos Útiles
+## 📝 Notas de Desarrollo
 
-```bash
-# Ejecutar tests específicos
-npm test -- AddMarcaModal
+### Arquitectura ID-based
+- **Antes**: Nombres (marca="CORONA", ciudad="BOGOTA")
+- **Ahora**: IDs (brand_id=4, city_id=5)
+- **Ventaja**: Integridad referencial, sin duplicados
 
-# Modo watch
-npm test -- --watch
+### AppContext como Source of Truth
+- Frontend carga maestros en `initializeApp()`
+- `dbService` busca primero en AppContext
+- Evita llamadas API redundantes
 
-# Cobertura detallada
-npm test -- --coverage
+### Optimizaciones de Performance
+- ✅ Paginación backend: `?page=1&limit=50`
+- ✅ Scroll infinito con Intersection Observer
+- ✅ Lazy loading de imágenes
+- ✅ Prefetch inteligente (300px)
+- ✅ Grid optimizado (280px mínimo)
 
-# Tests sin watch
-npm test -- --watchAll=false
+---
 
-# Tests con patrón específico
-npm test -- --testNamePattern="renders modal"
-```
+## 📦 Dependencias Principales
 
-### Snapshots
+### Frontend
+- `react` ^18.2.0
+- `axios` ^1.6.2
 
-Los tests generan snapshots del componente. Si cambias UI y los tests fallan:
+### Backend
+- `express` ^4.18.2
+- `sql.js` ^1.10.3
+- `geolib` ^3.3.4
+- `multer` ^1.4.5
 
-```bash
-# Revisar cambios
-npm test -- -u    # Actualizar snapshots después de revisar
+### Dev/Test
+- `jest` ^29.7.0
+- `supertest` ^6.3.3
 
-# Ver diff
-npm test -- --updateSnapshot
-```
+---
 
-## ✅ Validación de Tests
+## 🚦 Estado del Proyecto
 
-Todos los tests deben pasar antes de hacer cambios. Usa:
+**Versión**: 2.0  
+**Última actualización**: Febrero 2026
 
-```bash
-start-all-tests.bat
-```
+### Completado ✅
+- Arquitectura ID-based
+- Validación geográfica
+- Lazy loading + scroll infinito
+- Auto-fill de formularios
+- Tests completos (5 suites)
+- Generación PPT con plantilla
 
-Si algún test falla:
-1. Lee el mensaje de error
-2. Abre el archivo test correspondiente
-3. Verifica la lógica del componente
-4. Corre test nuevamente
-
-## ℹ️ Notas sobre ejecutables
-
-- No se distribuye un `.exe` para `start-all`; el arranque es vía `start-all.bat`.
-- Si necesitas un lanzador único, puedes crear un acceso directo al `.bat` o empaquetar con herramientas tipo `pkg`, pero no está incluido en este repo.
-
-## 📡 API (principales)
-
-- `POST /api/ooh/create` — crea registro OOH con 3 imágenes (valida tamaño y tipo)
-- `GET /api/ooh/all` — lista registros con joins a catálogos
-- `GET /api/ooh/:id` — detalle por ID
-
-## 💾 Almacenamiento de datos e imágenes
-
-- Base relacional SQLite en memoria con persistencia en archivo; se carga/migra desde CSV al iniciar.
-- Imágenes guardadas localmente en `backend/local-images/` con nombres hash + extensión original.
-- Catálogos (`ooh_types`, `brands`, `campaigns`) normalizan los registros en `ooh_records`.
-
-## 🐛 Troubleshooting rápido
-
-- Si no arranca el backend, borra `node_modules` y vuelve a ejecutar `backend/start-dev.bat`.
-- Si no ves datos, revisa que el CSV fuente esté accesible y que la migración haya corrido (se ejecuta al iniciar el backend).
-- Si el frontend no carga, confirma que el backend está en http://localhost:8080 y reinicia `start-frontend.bat`.
- - Si el frontend no carga, confirma que el backend está en http://localhost:8080 y reinicia `start-frontend.bat`.
- 
-## ▶️ Nuevos scripts de arranque
-
-Se añadieron scripts para facilitar el arranque local. Uso rápido:
-
-- **`start-all.bat`**: instala dependencias si es necesario (usa `npm ci` cuando exista `package-lock.json`), ejecuta la migración CSV del backend y levanta backend + frontend en ventanas separadas. Ejecutar desde la raíz:
-
-```powershell
-cd "c:\Users\migduran\Documents\nuevo ooh"
-.\start-all.bat
-```
-
-- **`start-direct.bat`**: arranca backend y frontend directamente (no instala dependencias). Útil cuando ya instalaste `node_modules` en ambas carpetas:
-
-```powershell
-cd "c:\Users\migduran\Documents\nuevo ooh"
-.\start-direct.bat
-```
-
-- **Arranque manual (rápido)**:
-
-```powershell
-cd backend
-npm run dev
-
-cd ../frontend
-npm run dev   # o npm start
-```
-
-- **Solución rápida: `react-scripts` no encontrado**
-
-Si ves "react-scripts no se reconoce", corrige la versión y reinstala:
-
-```powershell
-cd frontend
-npm install react-scripts@5.0.1 --save
-if (Test-Path package-lock.json) { npm ci } else { npm install }
-npm run dev
-```
-
-Esto instala el paquete correcto y recrea `node_modules` para que `react-scripts` esté disponible.
-
-Si prefieres que el script instale automáticamente dependencias cuando falta `node_modules`, puedo actualizar `start-direct.bat` o `start-all.bat` para hacerlo.
+---
 
 ## 📄 Licencia
 
-Proyecto disponible bajo licencia libre.
+Proyecto privado - Todos los derechos reservados

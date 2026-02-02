@@ -6,10 +6,113 @@ const AppContext = createContext();
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 export const AppProvider = ({ children }) => {
+  // Datos maestros
   const [brands, setBrands] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [advertisers, setAdvertisers] = useState([]);
   const [oohTypes, setOohTypes] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [addresses, setAddresses] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [regions, setRegions] = useState([]);
+  
+  // Datos transaccionales
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+
+  // Cargar TODOS los datos maestros en una sola llamada
+  const initializeApp = useCallback(async () => {
+    setLoading(true);
+    try {
+      console.log('🚀 Inicializando app... URL:', API_URL);
+      const startTime = performance.now();
+      const res = await axios.get(`${API_URL}/api/ooh/initialize`);
+      const endTime = performance.now();
+      const requestTime = (endTime - startTime).toFixed(2);
+      
+      // Calcular tamaño de la respuesta recibida
+      const jsonString = JSON.stringify(res.data);
+      const sizeInBytes = new Blob([jsonString]).size;
+      const sizeInKB = (sizeInBytes / 1024).toFixed(2);
+      const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
+      
+      console.log(`⏱️ TIEMPO DE REQUEST: ${requestTime}ms`);
+      console.log(`📊 TAMAÑO DE RESPUESTA (cliente):`);
+      console.log(`   Bytes: ${sizeInBytes}`);
+      console.log(`   KB: ${sizeInKB}`);
+      console.log(`   MB: ${sizeInMB}`);
+      
+      // Log completo de la respuesta
+      console.log('✅ RESPUESTA COMPLETA DEL SERVIDOR:', res.data);
+      console.log('📋 Estructura recibida:', Object.keys(res.data));
+      if (res.data.data) {
+        console.log('📦 Claves en data:', Object.keys(res.data.data));
+      }
+      
+      if (res.data.success) {
+        console.log('📊 Cargando datos maestros...');
+        const {
+          brands = [],
+          campaigns = [],
+          categories = [],
+          advertisers = [],
+          oohTypes = [],
+          cities = [],
+          addresses = [],
+          providers = [],
+          regions = [],
+          records = []
+        } = res.data.data;
+        
+        setBrands(brands);
+        setCampaigns(campaigns);
+        setCategories(categories);
+        setAdvertisers(advertisers);
+        setOohTypes(oohTypes);
+        setCities(cities);
+        setAddresses(addresses);
+        setProviders(providers);
+        setRegions(regions);
+        setRecords(records);
+        
+        console.log('📈 RESUMEN DATOS CARGADOS:', {
+          brands: brands.length,
+          campaigns: campaigns.length,
+          categories: categories.length,
+          advertisers: advertisers.length,
+          oohTypes: oohTypes.length,
+          cities: cities.length,
+          addresses: addresses.length,
+          providers: providers.length,
+          regions: regions.length,
+          records: records.length
+        });
+        
+        // Log detallado de cada tipo de dato
+        console.log('🏷️ BRANDS:', brands);
+        console.log('📋 CAMPAIGNS:', campaigns);
+        console.log('📂 CATEGORIES:', categories);
+        console.log('🏢 ADVERTISERS:', advertisers);
+        console.log('🚀 OOH_TYPES:', oohTypes);
+        console.log('🏙️ CITIES:', cities);
+        console.log('📍 ADDRESSES:', addresses);
+        console.log('🏭 PROVIDERS:', providers);
+        console.log('🗺️ REGIONS:', regions);
+        console.log('📊 RECORDS:', records);
+        
+        setInitialized(true);
+      } else {
+        console.error('❌ Error en respuesta:', res.data);
+      }
+    } catch (error) {
+      console.error('❌ Error inicializando app:', error.message);
+      console.error('   Detalles:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Cargar marcas desde API
   const fetchBrands = useCallback(async () => {
@@ -19,7 +122,9 @@ export const AppProvider = ({ children }) => {
         const brandsData = res.data.data.map(b => ({
           id: b.id,
           nombre: b.nombre,
-          categoria: b.categoria || ''
+          categoria: b.categoria || '',
+          category_id: b.category_id,
+          advertiser_id: b.advertiser_id
         }));
         setBrands(brandsData);
         return brandsData;
@@ -59,18 +164,47 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  // Cargar todos los registros
-  const fetchRecords = useCallback(async () => {
+  // Cargar ciudades desde API
+  const fetchCities = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_URL}/api/ooh/cities/all`);
+      if (res.data.success) {
+        const citiesData = res.data.data.map(c => ({
+          id: c.id,
+          nombre: c.nombre,
+          latitud: c.latitud,
+          longitud: c.longitud,
+          radioKm: c.radio_km,
+          region: c.region
+        }));
+        setCities(citiesData);
+        return citiesData;
+      }
+    } catch (error) {
+      console.error('❌ Error cargando ciudades:', error);
+      return [];
+    }
+  }, []);
+
+  // Cargar todos los registros con paginación
+  const fetchRecords = useCallback(async (page = 1, limit = 1000) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_URL}/api/ooh/all`);
+      console.log(`📄 Cargando registros: page=${page}, limit=${limit}`);
+      const res = await axios.get(`${API_URL}/api/ooh/all`, {
+        params: { page, limit }
+      });
       if (res.data.success) {
+        console.log(`✅ Registros cargados: ${res.data.data.length} de ${res.data.pagination?.total || 'N/A'}`);
         setRecords(res.data.data);
-        return res.data.data;
+        return {
+          data: res.data.data,
+          pagination: res.data.pagination
+        };
       }
     } catch (error) {
       console.error('Error cargando registros:', error);
-      return [];
+      return { data: [], pagination: null };
     } finally {
       setLoading(false);
     }
@@ -196,13 +330,28 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   const value = {
+    // Datos maestros
     brands,
+    campaigns,
+    categories,
+    advertisers,
     oohTypes,
+    cities,
+    addresses,
+    providers,
+    regions,
+    
+    // Datos transaccionales
     records,
     loading,
+    initialized,
+    
+    // Funciones
+    initializeApp,
     fetchBrands,
     fetchCampaigns,
     fetchOohTypes,
+    fetchCities,
     fetchRecords,
     createBrand,
     createCampaign,
