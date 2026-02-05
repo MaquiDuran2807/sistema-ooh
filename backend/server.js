@@ -2,6 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
+const http = require('http');
+let cron = null;
+try {
+  cron = require('node-cron');
+} catch (err) {
+  console.warn('⚠️ node-cron no está disponible. Instala con: npm install node-cron');
+}
 require('dotenv').config();
 
 const oohRoutes = require('./routes/ooh');
@@ -10,6 +17,9 @@ const dbService = require('./services/dbService');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+const USE_BIGQUERY = process.env.USE_BIGQUERY === 'true' || false;
+const BIGQUERY_DAILY_SYNC = process.env.BIGQUERY_DAILY_SYNC !== 'false';
+const BIGQUERY_SYNC_CRON = process.env.BIGQUERY_SYNC_CRON || '0 2 * * *';
 
 // Middleware
 app.use(cors());
@@ -102,6 +112,49 @@ const start = async () => {
     console.log('✅ Base de datos inicializada');
   } catch (error) {
     console.error('❌ Error inicializando BD:', error);
+  }
+
+  const triggerBigQuerySync = (reason = 'manual') => {
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        method: 'POST',
+        hostname: 'localhost',
+        port: PORT,
+        path: '/api/ooh/bigquery/sync'
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => {
+          console.log(`📊 [BIGQUERY SYNC] (${reason}) Status: ${res.statusCode}`);
+          if (body) {
+            console.log(`📊 [BIGQUERY SYNC] (${reason}) Response: ${body.substring(0, 200)}`);
+          }
+          resolve();
+        });
+      });
+      req.on('error', (err) => {
+        console.error(`❌ [BIGQUERY SYNC] (${reason}) Error:`, err.message);
+        reject(err);
+      });
+      req.end();
+    });
+  };
+
+  // Programar sincronización diaria (si está habilitada)
+  if (USE_BIGQUERY && BIGQUERY_DAILY_SYNC) {
+    if (!cron) {
+      console.warn('⚠️ BigQuery sync diario no se programó: node-cron no está instalado');
+    } else if (cron.validate(BIGQUERY_SYNC_CRON)) {
+      cron.schedule(BIGQUERY_SYNC_CRON, () => {
+        console.log(`🕒 [BIGQUERY SYNC] Ejecutando sync programado (${BIGQUERY_SYNC_CRON})`);
+        triggerBigQuerySync('cron').catch(() => {});
+      });
+      console.log(`🕒 BigQuery sync diario programado: ${BIGQUERY_SYNC_CRON}`);
+    } else {
+      console.warn(`⚠️ BIGQUERY_SYNC_CRON inválido: ${BIGQUERY_SYNC_CRON}`);
+    }
+  } else if (USE_BIGQUERY) {
+    console.log('🕒 BigQuery sync diario desactivado (BIGQUERY_DAILY_SYNC=false)');
   }
 };
 

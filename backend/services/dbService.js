@@ -121,6 +121,7 @@ const initDB = async () => {
       provider_id INTEGER,
       address_id INTEGER,
       city_id INTEGER,
+      checked INTEGER DEFAULT 0,
       direccion TEXT NOT NULL,
       latitud REAL,
       longitud REAL,
@@ -148,7 +149,10 @@ const initDB = async () => {
       ooh_record_id TEXT NOT NULL,
       ruta TEXT NOT NULL,
       orden INTEGER NOT NULL DEFAULT 1,
+      role TEXT DEFAULT 'gallery',
+      slot INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (ooh_record_id) REFERENCES ooh_records(id) ON DELETE CASCADE,
       UNIQUE(ooh_record_id, orden)
     )`
@@ -157,6 +161,50 @@ const initDB = async () => {
   try {
     for (const sql of createTablesSQL) {
       db.run(sql);
+    }
+
+    // Migración ligera: agregar columnas faltantes en ooh_records
+    try {
+      const info = db.exec('PRAGMA table_info(ooh_records)');
+      const columns = info[0] ? info[0].values.map(row => row[1]) : [];
+
+      const ensureColumn = (name, type) => {
+        if (!columns.includes(name)) {
+          db.run(`ALTER TABLE ooh_records ADD COLUMN ${name} ${type}`);
+          console.log(`✅ Columna ${name} agregada a ooh_records`);
+        }
+      };
+
+      ensureColumn('checked', 'INTEGER DEFAULT 0');
+      ensureColumn('imagen_1', 'TEXT');
+      ensureColumn('imagen_2', 'TEXT');
+      ensureColumn('imagen_3', 'TEXT');
+      ensureColumn('synced_to_bigquery', 'DATETIME');
+      ensureColumn('bq_sync_status', 'TEXT DEFAULT "pending"');
+    } catch (migError) {
+      console.warn('⚠️ No se pudo verificar/agregar columnas en ooh_records:', migError.message);
+    }
+
+    // Migración ligera: agregar columnas faltantes en images
+    try {
+      const infoImg = db.exec('PRAGMA table_info(images)');
+      const imgColumns = infoImg[0] ? infoImg[0].values.map(row => row[1]) : [];
+
+      const ensureImageColumn = (name, type) => {
+        if (!imgColumns.includes(name)) {
+          db.run(`ALTER TABLE images ADD COLUMN ${name} ${type}`);
+          console.log(`✅ Columna ${name} agregada a images`);
+        }
+      };
+
+      ensureImageColumn('role', "TEXT DEFAULT 'gallery'");
+      ensureImageColumn('slot', 'INTEGER');
+      ensureImageColumn('updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+
+      // Backfill: marcar primeras 3 imágenes como principales si role está vacío
+      db.run("UPDATE images SET role = 'primary', slot = orden WHERE (role IS NULL OR role = '') AND orden <= 3");
+    } catch (migError) {
+      console.warn('⚠️ No se pudo verificar/agregar columnas en images:', migError.message);
     }
     
     // Cargar datos maestros completos
@@ -555,13 +603,19 @@ const addRecord = async (data) => {
   const buildImagePath = (imagePath) => {
     if (!imagePath) return '';
     
-    // Si ya es una ruta absoluta válida, retornarla
+    // ✅ SI es una URL (GCS o HTTP), retornarla tal cual (nunca convertir URLs a rutas locales)
+    if (typeof imagePath === 'string' && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
+      console.log(`✅ URL de GCS detectada, guardando tal cual: ${imagePath.substring(0, 80)}...`);
+      return imagePath;
+    }
+    
+    // Si es una ruta absoluta válida, retornarla (para compatibilidad con local-images antiguo)
     if (path.isAbsolute(imagePath)) {
       const normalized = path.normalize(imagePath);
       if (fs.existsSync(normalized)) return normalized;
     }
     
-    // Si es una URL de API, convertir a ruta local
+    // Si es una URL de API, convertir a ruta local SOLO para compatibilidad backwards
     if (imagePath.startsWith('/api/images/')) {
       const relativePart = imagePath.replace(/^\/api\/images\//, '');
       const baseDir = path.join(__dirname, '../local-images');
@@ -569,13 +623,13 @@ const addRecord = async (data) => {
       if (fs.existsSync(candidate)) return candidate;
     }
     
-    // Si es una ruta relativa, buscar en local-images
+    // Si es una ruta relativa, buscar en local-images (compatibilidad backwards)
     const clean = String(imagePath).replace(/^\/api\/images\//, '');
     const baseDir = path.join(__dirname, '../local-images');
     const candidate = path.join(baseDir, clean);
     if (fs.existsSync(candidate)) return candidate;
     
-    // Búsqueda recursiva por nombre de archivo
+    // Búsqueda recursiva por nombre de archivo (compatibilidad backwards)
     const filename = path.basename(clean);
     const stack = [baseDir];
     while (stack.length) {
@@ -651,8 +705,8 @@ const addRecord = async (data) => {
   const stmt = db.prepare(`
     INSERT INTO ooh_records 
     (id, brand_id, campaign_id, ooh_type_id, provider_id, address_id,
-     fecha_inicio, fecha_final)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     checked, fecha_inicio, fecha_final, imagen_1, imagen_2, imagen_3)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.bind([
@@ -662,20 +716,28 @@ const addRecord = async (data) => {
     oohTypeId,
     providerId,
     addressId,
+    data.checked ? 1 : 0,
     data.fechaInicio || '',
-    data.fechaFin || ''
+    data.fechaFin || '',
+    img1 || '',
+    img2 || '',
+    img3 || ''
   ]);
 
   stmt.step();
   stmt.free();
   
   // Insertar imágenes en la tabla images
-  const imagenes = [img1, img2, img3].filter(img => img && img.trim() !== '');
+  const imagenes = Array.isArray(data.imagenes) && data.imagenes.length > 0
+    ? data.imagenes
+    : [img1, img2, img3].filter(img => img && img.trim() !== '');
+
   if (imagenes.length > 0) {
-    const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden) VALUES (?, ?, ?)');
+    const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden, role, slot) VALUES (?, ?, ?, ?, ?)');
     imagenes.forEach((imgPath, idx) => {
       if (imgPath) {
-        insertImg.bind([data.id, imgPath, idx + 1]);
+        const isPrimary = idx < 3;
+        insertImg.bind([data.id, imgPath, idx + 1, isPrimary ? 'primary' : 'gallery', isPrimary ? idx + 1 : null]);
         insertImg.step();
         insertImg.reset();
       }
@@ -695,13 +757,19 @@ const updateRecord = async (id, data) => {
   const buildImagePath = (imagePath) => {
     if (!imagePath) return '';
     
-    // Si ya es una ruta absoluta válida, retornarla
+    // ✅ SI es una URL (GCS o HTTP), retornarla tal cual (nunca convertir URLs a rutas locales)
+    if (typeof imagePath === 'string' && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
+      console.log(`✅ URL de GCS detectada, guardando tal cual: ${imagePath.substring(0, 80)}...`);
+      return imagePath;
+    }
+    
+    // Si es una ruta absoluta válida, retornarla (para compatibilidad con local-images antiguo)
     if (path.isAbsolute(imagePath)) {
       const normalized = path.normalize(imagePath);
       if (fs.existsSync(normalized)) return normalized;
     }
     
-    // Si es una URL de API, convertir a ruta local
+    // Si es una URL de API, convertir a ruta local SOLO para compatibilidad backwards
     if (imagePath.startsWith('/api/images/')) {
       const relativePart = imagePath.replace(/^\/api\/images\//, '');
       const baseDir = path.join(__dirname, '../local-images');
@@ -709,13 +777,13 @@ const updateRecord = async (id, data) => {
       if (fs.existsSync(candidate)) return candidate;
     }
     
-    // Si es una ruta relativa, buscar en local-images
+    // Si es una ruta relativa, buscar en local-images (compatibilidad backwards)
     const clean = String(imagePath).replace(/^\/api\/images\//, '');
     const baseDir = path.join(__dirname, '../local-images');
     const candidate = path.join(baseDir, clean);
     if (fs.existsSync(candidate)) return candidate;
     
-    // Búsqueda recursiva por nombre de archivo
+    // Búsqueda recursiva por nombre de archivo (compatibilidad backwards)
     const filename = path.basename(clean);
     const stack = [baseDir];
     while (stack.length) {
@@ -817,11 +885,16 @@ const updateRecord = async (id, data) => {
     addressId = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
   }
 
-  // Actualizar registro OOH (solo FK)
+  // Actualizar registro OOH (incluye imágenes para mantener compatibilidad)
+  // IMPORTANTE: Marcar como pendiente de sincronización si hay cambios en imágenes
+  const hasPendingChanges = data.imagenes && data.imagenes.length > 0;
+  
   const stmt = db.prepare(`
     UPDATE ooh_records SET
       brand_id = ?, campaign_id = ?, ooh_type_id = ?, address_id = ?, provider_id = ?,
-      fecha_inicio = ?, fecha_final = ?,
+      checked = ?, fecha_inicio = ?, fecha_final = ?,
+      imagen_1 = ?, imagen_2 = ?, imagen_3 = ?,
+      bq_sync_status = ?, synced_to_bigquery = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `);
@@ -832,8 +905,14 @@ const updateRecord = async (id, data) => {
     oohTypeId,
     addressId,
     providerId,
+    typeof data.checked === 'undefined' ? (existing ? existing.checked : 0) : (data.checked ? 1 : 0),
     data.fechaInicio || '',
     fechaFinal,
+    img1 || '',
+    img2 || '',
+    img3 || '',
+    hasPendingChanges ? 'pending' : existing?.bq_sync_status || 'pending', // Marcar como pending si hay nuevas imágenes
+    hasPendingChanges ? null : existing?.synced_to_bigquery, // Limpiar timestamp si hay cambios
     id
   ]);
 
@@ -849,10 +928,11 @@ const updateRecord = async (id, data) => {
     deleteImgs.free();
     
     // Insertar nuevas imágenes
-    const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden) VALUES (?, ?, ?)');
+    const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden, role, slot) VALUES (?, ?, ?, ?, ?)');
     data.imagenes.forEach((imgPath, idx) => {
       if (imgPath) {
-        insertImg.bind([id, buildImagePath(imgPath), idx + 1]);
+        const isPrimary = idx < 3;
+        insertImg.bind([id, buildImagePath(imgPath), idx + 1, isPrimary ? 'primary' : 'gallery', isPrimary ? idx + 1 : null]);
         insertImg.step();
         insertImg.reset();
       }
@@ -871,6 +951,9 @@ const getRecordById = (id) => {
   const stmt = db.prepare(`
     SELECT 
       r.*,
+      addr.city_id as city_id,
+      city.region_id as region_id,
+      b.category_id as category_id,
       b.nombre as marca,
       c.nombre as campana,
       t.nombre as tipo_ooh,
@@ -922,6 +1005,106 @@ const getRecordById = (id) => {
   return result;
 };
 
+// Obtener todas las imágenes de un registro
+const getRecordImages = (recordId) => {
+  if (!db) return [];
+  const stmt = db.prepare(`
+    SELECT id, ruta, orden, role, slot, created_at
+    FROM images
+    WHERE ooh_record_id = ?
+    ORDER BY orden
+  `);
+  stmt.bind([recordId]);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+};
+
+// Agregar múltiples imágenes a un registro (role=gallery por defecto)
+const addRecordImages = (recordId, imageUrls = []) => {
+  if (!db || !recordId || imageUrls.length === 0) return [];
+
+  const maxStmt = db.prepare('SELECT COALESCE(MAX(orden), 0) as maxOrden FROM images WHERE ooh_record_id = ?');
+  maxStmt.bind([recordId]);
+  maxStmt.step();
+  const maxOrden = maxStmt.getAsObject().maxOrden || 0;
+  maxStmt.free();
+
+  const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden, role, slot) VALUES (?, ?, ?, ?, ?)');
+  imageUrls.forEach((url, idx) => {
+    const orden = maxOrden + idx + 1;
+    insertImg.bind([recordId, url, orden, 'gallery', null]);
+    insertImg.step();
+    insertImg.reset();
+  });
+  insertImg.free();
+  saveDB();
+  return getRecordImages(recordId);
+};
+
+// Actualizar roles/slots de imágenes y sincronizar imagen_1..3
+const setRecordImageRoles = (recordId, selections = []) => {
+  if (!db || !recordId) return;
+
+  // Limpiar roles actuales
+  const resetStmt = db.prepare(`
+    UPDATE images
+    SET role = 'gallery', slot = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE ooh_record_id = ?
+  `);
+  resetStmt.bind([recordId]);
+  resetStmt.step();
+  resetStmt.free();
+
+  // Asignar nuevos roles
+  const updateStmt = db.prepare(`
+    UPDATE images
+    SET role = 'primary', slot = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND ooh_record_id = ?
+  `);
+
+  selections.forEach(({ id, slot }) => {
+    updateStmt.bind([slot, id, recordId]);
+    updateStmt.step();
+    updateStmt.reset();
+  });
+  updateStmt.free();
+
+  // Sincronizar imagen_1..3
+  const primaryStmt = db.prepare(`
+    SELECT ruta, slot
+    FROM images
+    WHERE ooh_record_id = ? AND role = 'primary'
+    ORDER BY slot ASC
+  `);
+  primaryStmt.bind([recordId]);
+
+  const primaryImages = [];
+  while (primaryStmt.step()) {
+    const row = primaryStmt.getAsObject();
+    primaryImages.push(row.ruta);
+  }
+  primaryStmt.free();
+
+  const img1 = primaryImages[0] || '';
+  const img2 = primaryImages[1] || '';
+  const img3 = primaryImages[2] || '';
+
+  const updateRecordStmt = db.prepare(`
+    UPDATE ooh_records
+    SET imagen_1 = ?, imagen_2 = ?, imagen_3 = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+  updateRecordStmt.bind([img1, img2, img3, recordId]);
+  updateRecordStmt.step();
+  updateRecordStmt.free();
+
+  saveDB();
+};
+
 // Obtener todos los registros con filtros opcionales (con JOINs)
 const getAllRecords = (filters = {}) => {
   if (!db) return [];
@@ -931,6 +1114,7 @@ const getAllRecords = (filters = {}) => {
       r.id,
       r.fecha_inicio,
       r.fecha_final,
+      r.checked,
       r.created_at,
       r.updated_at,
       b.nombre as marca, 
@@ -979,15 +1163,26 @@ const getAllRecords = (filters = {}) => {
   }
 
   if (filters.mes) {
-    // Filtrar por mes (yyyy-MM)
-    query += ' AND (DATE(r.fecha_inicio) >= ? AND DATE(r.fecha_inicio) <= ?)';
-    const [year, month] = filters.mes.split('-');
-    const startDate = `${year}-${month}-01`;
-    const endDate = `${year}-${month}-31`;
-    params.push(startDate, endDate);
+    // Filtrar por mes (yyyy-MM) si inicio o fin cae en el mes
+    const mes = String(filters.mes).trim();
+    query += " AND (strftime('%Y-%m', r.fecha_inicio) = ? OR strftime('%Y-%m', IFNULL(r.fecha_final, r.fecha_inicio)) = ?)";
+    params.push(mes, mes);
   }
 
-  query += ' ORDER BY r.created_at DESC';
+  if (filters.ano && !filters.mes) {
+    // Filtrar por año (yyyy) si inicio o fin cae en el año
+    const year = String(filters.ano).trim();
+    query += " AND (strftime('%Y', r.fecha_inicio) = ? OR strftime('%Y', IFNULL(r.fecha_final, r.fecha_inicio)) = ?)";
+    params.push(year, year);
+  }
+
+  query += ` ORDER BY 
+    CASE 
+      WHEN DATE('now') BETWEEN DATE(r.fecha_inicio) AND DATE(r.fecha_final) THEN 0
+      ELSE 1
+    END,
+    DATE(r.fecha_inicio) DESC,
+    r.created_at DESC`;
 
   const stmt = db.prepare(query);
   stmt.bind(params);
@@ -1085,6 +1280,12 @@ const addCampaign = async (nombre, brandId) => {
 const addOOHType = async (nombre) => {
   if (!db) await initDB();
   return await getOrCreateOOHType(nombre);
+};
+
+// Agregar proveedor
+const addProvider = async (nombre) => {
+  if (!db) await initDB();
+  return await getOrCreateProvider(nombre);
 };
 
 // Buscar registros existentes por dirección, fecha, marca, campaña
@@ -1474,6 +1675,74 @@ const getCityById = (id) => {
   return result;
 };
 
+// ============================================
+// 📊 ESTADOS OOH - Funciones de estados
+// ============================================
+
+const getAllOOHStates = () => {
+  if (!db) return [];
+  const stmt = db.prepare('SELECT * FROM ooh_states ORDER BY nombre');
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+};
+
+const getOOHStateById = (stateId) => {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT * FROM ooh_states WHERE id = ?');
+  stmt.bind([stateId]);
+  let result = null;
+  if (stmt.step()) {
+    result = stmt.getAsObject();
+  }
+  stmt.free();
+  return result;
+};
+
+const getOOHStateByName = (nombre) => {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT * FROM ooh_states WHERE nombre = ?');
+  stmt.bind([nombre.toUpperCase()]);
+  let result = null;
+  if (stmt.step()) {
+    result = stmt.getAsObject();
+  }
+  stmt.free();
+  return result;
+};
+
+const addOOHState = async (nombre, descripcion = '') => {
+  if (!db) await initDB();
+  
+  // Buscar si ya existe
+  const existing = getOOHStateByName(nombre);
+  if (existing) {
+    return existing.id;
+  }
+  
+  // Crear nuevo estado
+  try {
+    const insertSQL = `INSERT INTO ooh_states (nombre, descripcion) VALUES (?, ?)`;
+    db.run(insertSQL, [nombre.toUpperCase(), descripcion]);
+    
+    // Obtener el ID del último insertado
+    const lastIdStmt = db.prepare('SELECT last_insert_rowid() as id');
+    lastIdStmt.step();
+    const newId = lastIdStmt.getAsObject().id;
+    lastIdStmt.free();
+    
+    await saveDB();
+    console.log(`✅ Estado OOH creado: "${nombre}" con ID: ${newId}`);
+    return newId;
+  } catch (error) {
+    console.error(`❌ Error creando estado OOH "${nombre}":`, error);
+    throw error;
+  }
+};
+
 module.exports = {
   initDB,
   addRecord,
@@ -1500,6 +1769,7 @@ module.exports = {
   addBrand,
   addCampaign,
   addOOHType,
+  addProvider,
   getOrCreateBrand,
   getOrCreateCampaign,
   getOrCreateOOHType,
@@ -1517,6 +1787,15 @@ module.exports = {
   validateCityName,
   getCityNameVariations,
   addCity,
+  // Funciones de estados OOH
+  getAllOOHStates,
+  getOOHStateById,
+  getOOHStateByName,
+  addOOHState,
+  // Funciones de imágenes
+  getRecordImages,
+  addRecordImages,
+  setRecordImageRoles,
   // Función para obtener la instancia de DB
   getDatabase: () => db
 };

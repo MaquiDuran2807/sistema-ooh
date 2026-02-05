@@ -318,6 +318,50 @@
   background-color: #0056b3;
 }
 
+/* Form Actions */
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.submit-btn,
+.excel-upload-btn {
+  flex: 1;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.submit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.excel-upload-btn {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+.excel-upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(245, 87, 108, 0.3);
+}
+
 @media (max-width: 600px) {
   .ooh-form {
     padding: 20px;
@@ -329,5 +373,14 @@
 
   .ooh-form h2 {
     font-size: 1.5em;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .submit-btn,
+  .excel-upload-btn {
+    width: 100%;
   }
 }

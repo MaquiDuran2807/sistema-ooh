@@ -3,8 +3,21 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const PptxGenJS = require('pptxgenjs');
 const localStorageService = require('../services/localStorageService');
+const gcsService = require('../services/gcsService');
+const bigQueryService = require('../services/bigQueryService');
 const dbService = require('../services/dbService');
 const geoValidationService = require('../services/geoValidationService');
+
+// Configurar modo de almacenamiento
+const USE_GCS = process.env.USE_GCS === 'true' || false;
+const USE_BIGQUERY = process.env.USE_BIGQUERY === 'true' || false;
+const USE_BIGQUERY_REALTIME = process.env.BIGQUERY_REALTIME === 'true' || false;
+
+console.log(`🔧 Configuración de almacenamiento:`);
+console.log(`   - Cloud Storage (GCS): ${USE_GCS ? 'ACTIVADO' : 'DESACTIVADO'}`);
+console.log(`   - BigQuery: ${USE_BIGQUERY ? 'ACTIVADO' : 'DESACTIVADO'}`);
+console.log(`   - BigQuery Realtime: ${USE_BIGQUERY_REALTIME ? 'ACTIVADO' : 'DESACTIVADO'}`);
+console.log(`   - Almacenamiento local: ${!USE_GCS ? 'ACTIVADO' : 'DESACTIVADO'}`);
 
 // Utilidades para fechas y texto
 const parseDateSafe = (value) => {
@@ -155,6 +168,32 @@ const getLocalImagePath = (inputPath) => {
   return fullPath;
 };
 
+const buildBigQueryPayload = (record) => ({
+  id: record.id,
+  brand_id: record.brand_id,
+  campaign_id: record.campaign_id,
+  ooh_type_id: record.ooh_type_id,
+  provider_id: record.provider_id,
+  city_id: record.city_id,
+  category_id: record.category_id || null,
+  region_id: record.region_id || null,
+  brand_name: record.marca || null,
+  campaign_name: record.campana || null,
+  ooh_type_name: record.tipo_ooh || null,
+  provider_name: record.proveedor || null,
+  city_name: record.ciudad || null,
+  address: record.direccion || null,
+  latitude: record.latitud || null,
+  longitude: record.longitud || null,
+  start_date: record.fecha_inicio || null,
+  end_date: record.fecha_final || null,
+  created_at: record.created_at || null,
+  checked: record.checked ? true : false,
+  image_1_url: record.imagen_1 || null,
+  image_2_url: record.imagen_2 || null,
+  image_3_url: record.imagen_3 || null
+});
+
 const createOOH = async (req, res) => {
   // 📊 Detectar si es CREATE o UPDATE
   const existingId = req.body.existingId || req.body.id;
@@ -162,6 +201,14 @@ const createOOH = async (req, res) => {
   const emoji = existingId ? '🔄' : '➕';
   
   console.log(`\n${emoji} [${operationType} OOH] Iniciando ${existingId ? 'actualización' : 'creación'} de registro${existingId ? ` ID: ${existingId}` : ''}...`);
+  console.log(`📥 [${operationType}] Datos crudos recibidos:`, {
+    keys: Object.keys(req.body),
+    ooh_type_id: req.body.ooh_type_id,
+    ooh_type_id_type: typeof req.body.ooh_type_id,
+    brand_id: req.body.brand_id,
+    campaign_id: req.body.campaign_id,
+    city_id: req.body.city_id
+  });
   
   try {
     // 📊 NUEVA ARQUITECTURA: Aceptar IDs en lugar de nombres
@@ -169,7 +216,8 @@ const createOOH = async (req, res) => {
     // ✅ NUEVOS CAMPOS: Recibir IDs en lugar de nombres
     const { 
       brand_id, campaign_id, ooh_type_id, provider_id, city_id,  // ✅ IDs
-      direccion, latitud, longitud, fechaInicio, fechaFin       // campos comunes
+      direccion, latitud, longitud, fechaInicio, fechaFin,       // campos comunes
+      checked, estado_id                                           // ✅ NUEVO: estado_id
     } = req.body;
     
     // 🔄 COMPATIBILIDAD: Si vienen nombres (backend antiguo), rechazar
@@ -201,23 +249,54 @@ const createOOH = async (req, res) => {
     // ✅ Validar que se recibieron los IDs requeridos
     console.log(`📋 [${operationType}] Datos recibidos (IDs):`, { existingId, brand_id, campaign_id, ooh_type_id, provider_id, city_id, direccion, latitud, longitud });
 
-    if (!brand_id || !campaign_id || !ooh_type_id || !provider_id || !city_id || !direccion || !latitud || !longitud || !fechaInicio) {
+    // Validación mejorada: convertir string "undefined" a undefined
+    const ooh_type_id_clean = ooh_type_id === 'undefined' || ooh_type_id === '' ? undefined : ooh_type_id;
+    
+    if (!brand_id || !campaign_id || !ooh_type_id_clean || !provider_id || !city_id || !direccion || !latitud || !longitud || !fechaInicio) {
       console.log(`❌ [${operationType}] Error: Faltan IDs obligatorios`);
+      console.log(`   brand_id: ${brand_id}`);
+      console.log(`   campaign_id: ${campaign_id}`);
+      console.log(`   ooh_type_id: ${ooh_type_id} (clean: ${ooh_type_id_clean})`);
+      console.log(`   provider_id: ${provider_id}`);
+      console.log(`   city_id: ${city_id}`);
+      console.log(`   direccion: ${direccion}`);
+      console.log(`   latitud: ${latitud}`);
+      console.log(`   longitud: ${longitud}`);
+      console.log(`   fechaInicio: ${fechaInicio}`);
       return res.status(400).json({
         error: 'Faltan campos obligatorios',
         required: ['brand_id', 'campaign_id', 'ooh_type_id', 'provider_id', 'city_id', 'direccion', 'latitud', 'longitud', 'fechaInicio'],
-        received: Object.keys(req.body)
+        received: Object.keys(req.body),
+        details: `ooh_type_id recibido: "${ooh_type_id}"`
       });
     }
+
+    // Usar ooh_type_id_clean para todas las búsquedas
+    const ooh_type_id_final = parseInt(ooh_type_id_clean, 10);
 
     // ✅ Obtener datos relacionados desde BD usando los IDs
     console.log(`\n📚 [${operationType} - BD LOOKUP] Obteniendo datos relacionados por IDs...`);
     
     const brand = await dbService.getBrandById(brand_id);
     const campaign = await dbService.getCampaignById(campaign_id);
-    const oohType = await dbService.getOOHTypeById(ooh_type_id);
+    const oohType = await dbService.getOOHTypeById(ooh_type_id_final);
     const provider = await dbService.getProviderById(provider_id);
     const city = await dbService.getCityById(city_id);
+    
+    // ✅ NUEVO: Obtener estado (con default a ACTIVO si no viene)
+    let state = null;
+    let estado_id_final = estado_id ? parseInt(estado_id, 10) : 1; // 1 = ACTIVO por defecto
+    if (estado_id) {
+      state = dbService.getOOHStateById(estado_id_final);
+      if (!state) {
+        console.log(`⚠️ Estado con ID ${estado_id_final} no encontrado, usando ACTIVO por defecto`);
+        estado_id_final = 1;
+        state = dbService.getOOHStateById(1);
+      }
+    } else {
+      state = dbService.getOOHStateById(1);
+      console.log(`ℹ️ No se especificó estado_id, usando ACTIVO por defecto`);
+    }
 
     // ✅ Validar que todos los IDs existan
     if (!brand) {
@@ -227,7 +306,7 @@ const createOOH = async (req, res) => {
       return res.status(400).json({ error: `Campaña no encontrada con ID: ${campaign_id}` });
     }
     if (!oohType) {
-      return res.status(400).json({ error: `Tipo OOH no encontrado con ID: ${ooh_type_id}` });
+      return res.status(400).json({ error: `Tipo OOH no encontrado con ID: ${ooh_type_id_final}` });
     }
     if (!provider) {
       return res.status(400).json({ error: `Proveedor no encontrado con ID: ${provider_id}` });
@@ -239,9 +318,10 @@ const createOOH = async (req, res) => {
     console.log('✅ Todos los IDs validados en BD');
     console.log(`   • Brand: ${brand.nombre} (id=${brand_id})`);
     console.log(`   • Campaign: ${campaign.nombre} (id=${campaign_id})`);
-    console.log(`   • Type: ${oohType.nombre} (id=${ooh_type_id})`);
+    console.log(`   • Type: ${oohType.nombre} (id=${ooh_type_id_final})`);
     console.log(`   • Provider: ${provider.nombre} (id=${provider_id})`);
     console.log(`   • City: ${city.nombre} (id=${city_id})`);
+    console.log(`   • Estado: ${state ? state.nombre : 'ACTIVO'} (id=${estado_id_final})`);
 
     // ✅ AUTO-COMPUTAR: Derivar category_id desde brand.category_id
     const category_id = brand.category_id;
@@ -282,15 +362,19 @@ const createOOH = async (req, res) => {
           .filter(v => v >= 0 && v < 3)
       : [];
     
-    // Validar que haya al menos 1 imagen para registros nuevos
-    if (!isUpdate && (!req.files || req.files.length === 0)) {
+    // Validar que haya al menos 1 imagen para registros nuevos SOLO si NO viene de Excel
+    const isFromExcel = req.body.fromExcel === 'true' || req.body.fromExcel === true;
+    if (!isUpdate && !isFromExcel && (!req.files || req.files.length === 0)) {
       console.log('❌ Error: No se recibió ninguna imagen para registro nuevo');
       return res.status(400).json({
         error: '⚠️ Debes subir al menos 1 imagen para un nuevo registro. Se recomienda subir 3 imágenes.'
       });
     }
+    if (isFromExcel) {
+      console.log('📊 [EXCEL] Registro sin imágenes permitido (importación desde Excel)');
+    }
 
-    console.log('🔍 Buscando registro existente...');
+    console.log('🔍 Buscando registro existente para evitar duplicados...');
 
     let existing = null;
     if (existingId) {
@@ -302,7 +386,16 @@ const createOOH = async (req, res) => {
     
     const existingCSV = existing ? { lineIndex: 0, values: existing } : { lineIndex: -1, values: null };
 
-    console.log('📊 Registro existente:', existingCSV.values ? 'SÍ' : 'NO');
+    if (existingCSV.values) {
+      console.log('♻️ [ANTI-DUPLICADO] Registro YA existe en BD:', {
+        id: existingCSV.values.id,
+        marca: existingCSV.values.marca,
+        direccion: existingCSV.values.direccion,
+        fecha: existingCSV.values.fecha_inicio
+      });
+    } else {
+      console.log('✅ [ANTI-DUPLICADO] Registro nuevo, no hay duplicados');
+    }
 
     let id;
     let imageUrls = [];
@@ -321,23 +414,69 @@ const createOOH = async (req, res) => {
 
       // Si no hay nuevas imágenes, mantenemos las existentes tal cual
       if (!req.files || req.files.length === 0) {
-        console.log('📷 Manteniendo imágenes existentes');
+        console.log('📷 Manteniendo imágenes existentes (sin cambios)');
       } else {
-        console.log('📤 Subiendo nuevas imágenes (reemplazo parcial)...');
-        const uploadedUrls = await localStorageService.uploadToLocal(req.files, {
-          id,
-          marca: brand.nombre,
-          campana: campaign.nombre,
-          direccion: direccion.toUpperCase(),
-          fechaInicio: FECHA_INICIO
-        });
+        console.log('📤 Actualizando imágenes (reemplazo parcial)...');
+        
+        // Decidir donde subir las imágenes
+        let uploadedUrls;
+        if (USE_GCS) {
+          console.log('☁️ Subiendo nuevas imágenes a Google Cloud Storage...');
+
+          const basePrefix = process.env.GCP_HISTORICO_PREFIX || 'Historico/OOH-APP-IMAGES';
+          const normalizedBrand = brand.nombre.toUpperCase().replace(/\s+/g, '_');
+          const oldUrlsToDelete = [];
+
+          const filenames = req.files.map((file, idx) => {
+            const targetIndex = imageIndexes[idx] !== undefined ? imageIndexes[idx] : idx;
+            const oldUrl = imageUrls[targetIndex];
+            const defaultPath = `${basePrefix}/${normalizedBrand}/${id}/imagen_${targetIndex + 1}.png`;
+
+            if (oldUrl && oldUrl.startsWith('https://storage.googleapis.com/')) {
+              try {
+                const url = new URL(oldUrl);
+                const parts = url.pathname.split('/').filter(Boolean);
+                parts.shift();
+                const oldPath = parts.join('/');
+
+                if (oldPath.toLowerCase().endsWith('.png')) {
+                  return oldPath; // sobrescribir el mismo archivo PNG
+                }
+
+                // Si era JPG/otro formato, subir como PNG con nombre estándar y eliminar el anterior
+                oldUrlsToDelete.push(oldUrl);
+                return defaultPath;
+              } catch (e) {
+                return defaultPath;
+              }
+            }
+
+            return defaultPath;
+          });
+
+          uploadedUrls = await gcsService.uploadToGCS(req.files, brand.nombre, id, { filenames });
+
+          if (oldUrlsToDelete.length > 0) {
+            await Promise.all(oldUrlsToDelete.map((url) => gcsService.deleteFromGCS(url)));
+          }
+        } else {
+          uploadedUrls = await localStorageService.uploadToLocal(req.files, {
+            id,
+            marca: brand.nombre,
+            campana: campaign.nombre,
+            direccion: direccion.toUpperCase(),
+            fechaInicio: FECHA_INICIO
+          });
+        }
 
         // Reemplazar solo los slots indicados; si no se envían índices, reemplazar en orden
         uploadedUrls.forEach((url, idx) => {
           const targetIndex = imageIndexes[idx] !== undefined ? imageIndexes[idx] : idx;
           imageUrls[targetIndex] = url;
+          console.log(`✅ Slot ${targetIndex + 1} actualizado (URL estable si existía)`);
         });
       }
+
     } else {
       // Si no se encontró registro pero se envió un ID, es un error
       if (existingId) {
@@ -352,13 +491,20 @@ const createOOH = async (req, res) => {
       console.log(`🆕 Creando nuevo registro con ID: ${id}`);
       
       console.log('📤 Subiendo imágenes...');
-      imageUrls = await localStorageService.uploadToLocal(req.files, {
-        id,
-        marca: brand.nombre,
-        campana: campaign.nombre,
-        direccion: direccion.toUpperCase(),
-        fechaInicio: FECHA_INICIO
-      });
+      
+      // Decidir donde subir las imágenes
+      if (USE_GCS) {
+        console.log('☁️ Subiendo a Google Cloud Storage...');
+        imageUrls = await gcsService.uploadToGCS(req.files, brand.nombre, id);
+      } else {
+        imageUrls = await localStorageService.uploadToLocal(req.files, {
+          id,
+          marca: brand.nombre,
+          campana: campaign.nombre,
+          direccion: direccion.toUpperCase(),
+          fechaInicio: FECHA_INICIO
+        });
+      }
     }
     
     console.log('✅ Imágenes obtenidas:', imageUrls);
@@ -367,6 +513,9 @@ const createOOH = async (req, res) => {
     console.log('📊 Imagen 2:', imageUrls[2] ? imageUrls[2].substring(0, 80) : 'vacía');
     
     // ✅ CONSTRUIR oohData CON ARQUITECTURA ID-BASED
+    const normalizedChecked = String(checked).toLowerCase();
+    const isChecked = ['true', '1', 'yes', 'si'].includes(normalizedChecked);
+
     const oohData = {
       id,
       // ✅ NUEVOS CAMPOS: IDs en lugar de nombres
@@ -377,6 +526,7 @@ const createOOH = async (req, res) => {
       city_id: city_id,
       category_id: category_id,          // ✅ AUTO-COMPUTADO
       region_id: region_id,               // ✅ AUTO-COMPUTADO
+      estado_id: estado_id_final,         // ✅ NUEVO: estado_id
       // Datos locales para búsqueda rápida (denormalizados)
       marca: brand.nombre,
       campana: campaign.nombre,
@@ -391,15 +541,45 @@ const createOOH = async (req, res) => {
       // Fechas
       fechaInicio: FECHA_INICIO,
       fechaFin: FECHA_FIN || (existingCSV.values ? existingCSV.values.fecha_final : null),
+      checked: typeof checked === 'undefined' ? (existingCSV.values ? existingCSV.values.checked : 0) : isChecked,
       direccion: direccion.toUpperCase(),
       fechaCreacion: new Date().toISOString()
     };
 
     // Actualizar o agregar según corresponda
     if (existingCSV.values) {
-      console.log(`💾 [UPDATE] Actualizando registro existente ID: ${id}...`);
+      console.log(`\n💾 [UPDATE] Actualizando registro existente ID: ${id}...`);
       await dbService.updateRecord(id, oohData);
-      console.log(`✅ [UPDATE] Registro actualizado exitosamente - ID: ${id}`);
+      console.log(`✅ [UPDATE - SQLite] Registro actualizado en base de datos local`);
+      
+      // Si BigQuery está activo y en modo realtime, actualizar también allí
+      if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
+        try {
+          console.log('📊 [UPDATE - BigQuery] Actualizando registro en BigQuery...');
+          const bqRecord = await dbService.getRecordById(id);
+          if (bqRecord) {
+            await bigQueryService.updateOOHRecord(buildBigQueryPayload(bqRecord));
+            console.log('✅ [UPDATE - BigQuery] Registro actualizado exitosamente');
+          } else {
+            console.warn('⚠️ No se pudo obtener el registro de la BD para BigQuery');
+          }
+        } catch (bqError) {
+          console.error('⚠️ Error al actualizar en BigQuery (continuando):', bqError.message);
+        }
+      } else if (USE_BIGQUERY && !USE_BIGQUERY_REALTIME) {
+        console.log('⏭️  [UPDATE - BigQuery] Realtime desactivado; se sincronizará por endpoint/cron');
+      }
+      
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`✅ ACTUALIZACIÓN COMPLETADA`);
+      console.log(`   ID Registro: ${id}`);
+      console.log(`   Marca: ${brand.nombre}`);
+      console.log(`   Campaña: ${campaign.nombre}`);
+      console.log(`   Imágenes: ${imageUrls.filter(u => u).length}/3`);
+      console.log(`   SQLite: ✓ Actualizado`);
+      console.log(`   BigQuery: ${USE_BIGQUERY ? (USE_BIGQUERY_REALTIME ? '✓ Actualizado' : '⏭️ Pendiente sync') : '× No activado'}`);
+      console.log(`${'='.repeat(60)}\n`);
+      
       res.status(200).json({
         success: true,
         message: 'Registro actualizado exitosamente',
@@ -407,9 +587,38 @@ const createOOH = async (req, res) => {
         updated: true
       });
     } else {
-      console.log('💾 [CREATE] Guardando nuevo registro en base de datos...');
+      console.log('\n💾 [CREATE] Guardando nuevo registro en base de datos...');
       await dbService.addRecord(oohData);
-      console.log(`✅ [CREATE] Registro creado exitosamente - ID: ${oohData.id}`);
+      console.log(`✅ [CREATE - SQLite] Registro creado en base de datos local`);
+      
+      // Si BigQuery está activo y en modo realtime, guardar también allí
+      if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
+        try {
+          console.log('📊 [CREATE - BigQuery] Guardando registro en BigQuery...');
+          const bqRecord = await dbService.getRecordById(id);
+          if (bqRecord) {
+            await bigQueryService.insertOOHRecord(buildBigQueryPayload(bqRecord));
+            console.log('✅ [CREATE - BigQuery] Registro guardado exitosamente');
+          } else {
+            console.warn('⚠️ No se pudo obtener el registro de la BD para BigQuery');
+          }
+        } catch (bqError) {
+          console.error('⚠️ Error al guardar en BigQuery (continuando):', bqError.message);
+        }
+      } else if (USE_BIGQUERY && !USE_BIGQUERY_REALTIME) {
+        console.log('⏭️  [CREATE - BigQuery] Realtime desactivado; se sincronizará por endpoint/cron');
+      }
+      
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`✅ CREACIÓN COMPLETADA`);
+      console.log(`   ID Registro: ${id}`);
+      console.log(`   Marca: ${brand.nombre}`);
+      console.log(`   Campaña: ${campaign.nombre}`);
+      console.log(`   Imágenes: ${imageUrls.filter(u => u).length}/3`);
+      console.log(`   SQLite: ✓ Creado`);
+      console.log(`   BigQuery: ${USE_BIGQUERY ? (USE_BIGQUERY_REALTIME ? '✓ Creado' : '⏭️ Pendiente sync') : '× No activado'}`);
+      console.log(`${'='.repeat(60)}\n`);
+      
       res.status(201).json({
         success: true,
         message: 'Registro creado exitosamente',
@@ -430,15 +639,26 @@ const createOOH = async (req, res) => {
 const getAllOOH = async (req, res) => {
   console.log('\n🔵 [GET ALL OOH] Obteniendo registros...');
   try {
-    // Paginación: page (default 1), limit (default 50)
+    // Paginación: page (default 1), limit (default 20)
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     
     console.log(`📄 Paginación: page=${page}, limit=${limit}, offset=${offset}`);
     
-    // Leer todos los registros de la BD
-    const allRecords = await dbService.getAllRecords();
+    // Filtros opcionales
+    const filters = {};
+    if (req.query.mes) {
+      filters.mes = req.query.mes;
+      console.log(`📅 Filtro mes: ${req.query.mes}`);
+    }
+    if (req.query.ano) {
+      filters.ano = req.query.ano;
+      console.log(`📅 Filtro año: ${req.query.ano}`);
+    }
+    
+    // Leer todos los registros de la BD con filtros
+    const allRecords = await dbService.getAllRecords(filters);
     const total = allRecords.length;
     
     // Aplicar paginación en memoria
@@ -1013,6 +1233,7 @@ const validateCityName = async (req, res) => {
 const initializeApp = (req, res) => {
   try {
     const db = dbService.getDatabase();
+    const includeRecords = String(req.query.includeRecords || '').toLowerCase() === 'true';
     
     // Cargar marcas
     const brandsStmt = db.prepare('SELECT b.id, b.nombre, c.nombre as categoria, a.nombre as anunciante, b.category_id, b.advertiser_id FROM brands b JOIN categories c ON b.category_id = c.id JOIN advertisers a ON b.advertiser_id = a.id ORDER BY b.nombre');
@@ -1086,13 +1307,15 @@ const initializeApp = (req, res) => {
     }
     regionsStmt.free();
     
-    // Cargar registros OOH
-    const recordsStmt = db.prepare('SELECT o.id, o.brand_id, o.campaign_id, o.ooh_type_id, o.address_id, o.provider_id, o.fecha_inicio, o.fecha_final, b.nombre as marca, c.nombre as campana, t.nombre as tipo FROM ooh_records o JOIN brands b ON o.brand_id = b.id JOIN campaigns c ON o.campaign_id = c.id JOIN ooh_types t ON o.ooh_type_id = t.id ORDER BY o.fecha_inicio DESC');
-    const records = [];
-    while (recordsStmt.step()) {
-      records.push(recordsStmt.getAsObject());
+    // Cargar registros OOH (opcional)
+    let records = [];
+    if (includeRecords) {
+      const recordsStmt = db.prepare('SELECT o.id, o.brand_id, o.campaign_id, o.ooh_type_id, o.address_id, o.provider_id, o.fecha_inicio, o.fecha_final, b.nombre as marca, c.nombre as campana, t.nombre as tipo FROM ooh_records o JOIN brands b ON o.brand_id = b.id JOIN campaigns c ON o.campaign_id = c.id JOIN ooh_types t ON o.ooh_type_id = t.id ORDER BY o.fecha_inicio DESC');
+      while (recordsStmt.step()) {
+        records.push(recordsStmt.getAsObject());
+      }
+      recordsStmt.free();
     }
-    recordsStmt.free();
     
     const responseData = {
       success: true,
@@ -1244,6 +1467,22 @@ const getAllProviders = async (req, res) => {
   }
 };
 
+// Crear proveedor
+const createProvider = async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre de proveedor requerido' });
+    }
+    const providerId = await dbService.addProvider(nombre);
+    dbService.saveDB();
+    return res.status(201).json({ id: providerId, nombre });
+  } catch (error) {
+    console.error('❌ Error creando proveedor:', error);
+    return res.status(500).json({ error: 'Error creando proveedor' });
+  }
+};
+
 // Obtener proveedor por nombre (para mapeo frontend)
 const getProviderByName = async (req, res) => {
   try {
@@ -1300,22 +1539,89 @@ const deleteOOH = async (req, res) => {
       return res.status(400).json({ error: 'ID del registro requerido' });
     }
 
-    console.log(`\n🗑️  [DELETE OOH] Eliminando registro: ${id}`);
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🗑️  [DELETE OOH] Iniciando eliminación del registro: ${id}`);
+    console.log(`${'='.repeat(60)}\n`);
 
-    // Usar la función completa de eliminación del dbService
+    // Obtener información del registro antes de eliminarlo (para logs)
+    const existing = await dbService.findExistingById(id);
+    if (existing) {
+      console.log(`📋 Registro encontrado en BD Local:`);
+      console.log(`   • Marca: ${existing.marca}`);
+      console.log(`   • Campaña: ${existing.campana}`);
+      console.log(`   • Ciudad: ${existing.ciudad}`);
+    }
+
+    // 1️⃣ ELIMINAR DE BD LOCAL (SQLite)
+    console.log(`\n💾 [PASO 1] Eliminando de SQLite (BD Local)...`);
     const result = dbService.deleteOOHRecord(id);
 
     if (!result.success) {
-      console.error('❌ Error eliminando registro:', result.error);
+      console.error('❌ Error eliminando registro de SQLite:', result.error);
       return res.status(400).json({ 
         error: result.error,
         success: false 
       });
     }
+    console.log(`✅ Registro eliminado de SQLite`);
 
-    console.log(`✅ Eliminación completada`);
+    // 2️⃣ ELIMINAR DE BIG QUERY
+    if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
+      console.log(`\n📊 [PASO 2] Eliminando de BigQuery...`);
+      try {
+        await bigQueryService.deleteOOHRecord(id);
+        console.log(`✅ Registro eliminado de BigQuery`);
+      } catch (bqError) {
+        console.error('❌ Error eliminando registro de BigQuery:', bqError.message || bqError);
+        // No retornar error, continuar con la eliminación
+      }
+    } else if (USE_BIGQUERY && !USE_BIGQUERY_REALTIME) {
+      console.log(`⏭️  [PASO 2] Realtime desactivado; se sincronizará por endpoint/cron`);
+    } else {
+      console.log(`⏭️  [PASO 2] BigQuery no está activo - omitido`);
+    }
+
+    // 3️⃣ ELIMINAR IMÁGENES DE GCS
+    if (USE_GCS) {
+      console.log(`\n☁️  [PASO 3] Eliminando imágenes de Google Cloud Storage...`);
+      try {
+        const recordSource = existing;
+        const brandName = recordSource && (recordSource.marca || recordSource.brand || recordSource.nombre);
+
+        if (brandName) {
+          console.log(`   Eliminando carpeta: ${brandName}/${id}`);
+          await gcsService.deleteRecordFolder(brandName, id);
+          console.log(`✅ Carpeta de imágenes eliminada de GCS`);
+        } else {
+          console.warn('⚠️ No se encontró marca para eliminar carpeta en GCS');
+        }
+      } catch (gcsError) {
+        console.error('⚠️ Error eliminando archivos en GCS:', gcsError.message || gcsError);
+        // No retornar error, la eliminación principal ya fue exitosa
+      }
+    } else {
+      console.log(`⏭️  [PASO 3] GCS no está activo - omitido`);
+    }
+
+    // RESUMEN FINAL
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`✅ ELIMINACIÓN COMPLETADA`);
+    console.log(`   ID Registro: ${id}`);
+    console.log(`   SQLite: ✓ Eliminado`);
+    console.log(`   BigQuery: ${USE_BIGQUERY ? (USE_BIGQUERY_REALTIME ? '✓ Eliminado' : '⏭️ Pendiente sync') : '× No activado'}`);
+    console.log(`   GCS: ${USE_GCS ? '✓ Eliminado' : '× No activado'}`);
+    console.log(`${'='.repeat(60)}\n`);
     
-    return res.status(200).json(result);
+    return res.status(200).json({
+      success: true,
+      message: 'Registro eliminado exitosamente',
+      id,
+      deleted: {
+        sqlite: true,
+        bigquery: USE_BIGQUERY,
+        gcs: USE_GCS
+      }
+    });
 
   } catch (error) {
     console.error('❌ Error en deleteOOH:', error);
@@ -1323,6 +1629,289 @@ const deleteOOH = async (req, res) => {
       error: 'Error eliminando registro',
       detail: error.message 
     });
+  }
+};
+
+// Sincronizar BigQuery desde la BD local (full refresh)
+const syncBigQuery = async (req, res) => {
+  try {
+    if (!USE_BIGQUERY) {
+      return res.status(400).json({
+        success: false,
+        error: 'BigQuery no está activado'
+      });
+    }
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('🔄 [BIGQUERY SYNC] Iniciando sincronización completa desde SQLite...');
+    console.log(`${'='.repeat(60)}\n`);
+
+    const allRecords = await dbService.getAllRecords({});
+    console.log(`📦 Registros encontrados en SQLite: ${allRecords.length}`);
+
+    const payloads = [];
+    for (const record of allRecords) {
+      const full = await dbService.getRecordById(record.id);
+      if (full) {
+        payloads.push(buildBigQueryPayload(full));
+      } else {
+        console.warn(`⚠️ No se pudo cargar registro completo para ID: ${record.id}`);
+      }
+    }
+
+    const result = await bigQueryService.rebuildTableWithRecords(payloads);
+
+    console.log(`\n✅ [BIGQUERY SYNC] Sincronización completada`);
+    console.log(`   Registros enviados: ${payloads.length}`);
+    console.log(`   Registros insertados: ${result.inserted || 0}`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'BigQuery sincronizado correctamente',
+      totalRecords: payloads.length,
+      inserted: result.inserted || 0
+    });
+  } catch (error) {
+    console.error('❌ Error sincronizando BigQuery:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error sincronizando BigQuery',
+      details: error.message
+    });
+  }
+};
+
+// Sincronizar un registro específico a BigQuery (sin todos los demás)
+const syncRecordToBigQuery = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID de registro requerido'
+      });
+    }
+
+    if (!USE_BIGQUERY) {
+      return res.status(400).json({
+        success: false,
+        error: 'BigQuery no está activado'
+      });
+    }
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📊 [BIGQUERY SYNC] Sincronizando registro: ${id}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    // Obtener registro de BD local
+    const record = await dbService.getRecordById(id);
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        error: 'Registro no encontrado'
+      });
+    }
+
+    // Construir payload para BigQuery
+    const payload = buildBigQueryPayload(record);
+
+    // Insertar en BigQuery
+    await bigQueryService.insertOOHRecord(payload);
+
+    // Marcar como sincronizado en BD local
+    const db = dbService.getDatabase();
+    const updateStmt = db.prepare(`
+      UPDATE ooh_records 
+      SET synced_to_bigquery = CURRENT_TIMESTAMP, bq_sync_status = 'synced'
+      WHERE id = ?
+    `);
+    updateStmt.bind([id]);
+    updateStmt.step();
+    updateStmt.free();
+    dbService.saveDB();
+
+    console.log(`✅ [BIGQUERY SYNC] Registro sincronizado exitosamente`);
+    console.log(`   ID: ${id}`);
+    console.log(`   Marca: ${record.marca || 'N/A'}`);
+    console.log(`   Estado: SYNCED`);
+    console.log(`   Timestamp: ${new Date().toISOString()}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Registro sincronizado a BigQuery exitosamente',
+      data: {
+        id,
+        synced_to_bigquery: new Date().toISOString(),
+        bq_sync_status: 'synced'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error sincronizando registro a BigQuery:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error sincronizando a BigQuery',
+      details: error.message
+    });
+  }
+};
+
+// Actualizar campo "checked" (sin afectar otros datos ni imágenes)
+const updateChecked = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { checked } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID de registro requerido'
+      });
+    }
+
+    if (typeof checked === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'Campo "checked" requerido'
+      });
+    }
+
+    console.log(`\n🔄 [UPDATE CHECKED] Actualizando estado del registro: ${id}`);
+    console.log(`   Nuevo estado: ${checked ? 'CHEQUEADO ✓' : 'SIN CHEQUEAR ○'}`);
+
+    // Obtener registro actual
+    const record = await dbService.getRecordById(id);
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        error: 'Registro no encontrado'
+      });
+    }
+
+    // Actualizar solo el campo checked en BD local
+    const db = dbService.getDatabase();
+    const updateStmt = db.prepare(`
+      UPDATE ooh_records 
+      SET checked = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    updateStmt.bind([checked ? 1 : 0, id]);
+    updateStmt.step();
+    updateStmt.free();
+    dbService.saveDB();
+
+    console.log(`✅ [BD LOCAL] Registro actualizado`);
+
+    // Si BigQuery está activo y en realtime, actualizar allí también
+    if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
+      try {
+        console.log('📊 [BIGQUERY] Actualizando checked...');
+        const bqRecord = await dbService.getRecordById(id);
+        if (bqRecord) {
+          await bigQueryService.updateOOHRecord(buildBigQueryPayload(bqRecord));
+          console.log('✅ [BIGQUERY] Actualizado exitosamente');
+        }
+      } catch (bqError) {
+        console.error('⚠️ Error actualizando BigQuery:', bqError.message);
+        // No retornar error, continuar
+      }
+    }
+
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Registro actualizado exitosamente',
+      data: {
+        id,
+        checked: checked,
+        updated_at: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error actualizando checked:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error al actualizar el registro',
+      details: error.message
+    });
+  }
+};
+
+// ============================
+// 📸 IMÁGENES - Gestión avanzada
+// ============================
+
+// Obtener imágenes de un registro
+const getRecordImages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+
+    const images = dbService.getRecordImages(id);
+    return res.json({ success: true, data: images });
+  } catch (error) {
+    console.error('❌ Error obteniendo imágenes:', error);
+    return res.status(500).json({ error: 'Error obteniendo imágenes' });
+  }
+};
+
+// Subir imágenes adicionales a un registro
+const uploadRecordImages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No se recibieron imágenes' });
+    }
+
+    const record = dbService.getRecordById(id);
+    if (!record) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+
+    const brandName = record.marca || 'GENERAL';
+    let uploadedUrls = [];
+
+    if (USE_GCS) {
+      uploadedUrls = await gcsService.uploadToGCS(req.files, brandName, id);
+    } else {
+      uploadedUrls = await localStorageService.uploadToLocal(req.files, {
+        id,
+        marca: brandName,
+        campana: record.campana,
+        direccion: record.direccion,
+        fechaInicio: record.fecha_inicio
+      });
+    }
+
+    const updatedImages = dbService.addRecordImages(id, uploadedUrls);
+    return res.status(201).json({ success: true, data: updatedImages });
+  } catch (error) {
+    console.error('❌ Error subiendo imágenes adicionales:', error);
+    return res.status(500).json({ error: 'Error subiendo imágenes adicionales' });
+  }
+};
+
+// Actualizar roles de imágenes (principal/secundaria/terciaria/galería)
+const setRecordImageRoles = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { selections } = req.body;
+
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    if (!Array.isArray(selections)) {
+      return res.status(400).json({ error: 'Formato inválido de selecciones' });
+    }
+
+    dbService.setRecordImageRoles(id, selections);
+    const updatedImages = dbService.getRecordImages(id);
+
+    return res.json({ success: true, data: updatedImages });
+  } catch (error) {
+    console.error('❌ Error actualizando roles de imágenes:', error);
+    return res.status(500).json({ error: 'Error actualizando roles de imágenes' });
   }
 };
 
@@ -1345,6 +1934,78 @@ const createAddress = async (req, res) => {
     if (!city) {
       return res.status(400).json({ error: `Ciudad no encontrada con ID: ${city_id}` });
     }
+
+    // 🔍 BÚSQUEDA INTELIGENTE: Buscar dirección exacta o muy similar para evitar duplicados
+    const normalizeAddress = (value) => String(value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    const normalizedDescripcion = normalizeAddress(descripcion);
+
+    const db = dbService.getDatabase();
+    
+    // 1) Buscar coincidencia EXACTA primero
+    const findExactStmt = db.prepare(
+      'SELECT id, city_id, descripcion, latitud, longitud FROM addresses WHERE city_id = ? AND UPPER(descripcion) = ?'
+    );
+    findExactStmt.bind([city_id, normalizedDescripcion]);
+
+    if (findExactStmt.step()) {
+      const existingAddress = findExactStmt.getAsObject();
+      findExactStmt.free();
+
+      console.log('✅ [CREATE ADDRESS] Dirección existente (coincidencia exacta):', existingAddress);
+      return res.status(200).json({
+        success: true,
+        message: 'Dirección existente encontrada',
+        data: {
+          id: existingAddress.id,
+          city_id: existingAddress.city_id,
+          ciudad: city.nombre,
+          descripcion: existingAddress.descripcion,
+          latitud: existingAddress.latitud,
+          longitud: existingAddress.longitud
+        }
+      });
+    }
+    findExactStmt.free();
+    
+    // 2) Buscar direcciones SIMILARES (mismo city_id, coordenadas cercanas ±0.001 grados ≈ 100m)
+    // Esto detecta si escribieron mal la dirección pero las coordenadas son las mismas
+    const latFloat = parseFloat(latitud);
+    const lngFloat = parseFloat(longitud);
+    const tolerance = 0.001; // ~100 metros
+    
+    const findSimilarStmt = db.prepare(`
+      SELECT id, city_id, descripcion, latitud, longitud 
+      FROM addresses 
+      WHERE city_id = ? 
+        AND ABS(latitud - ?) < ? 
+        AND ABS(longitud - ?) < ?
+      LIMIT 1
+    `);
+    findSimilarStmt.bind([city_id, latFloat, tolerance, lngFloat, tolerance]);
+    
+    if (findSimilarStmt.step()) {
+      const similarAddress = findSimilarStmt.getAsObject();
+      findSimilarStmt.free();
+      
+      console.log('🔍 [CREATE ADDRESS] Dirección SIMILAR encontrada (mismas coordenadas ±100m):');
+      console.log(`   Buscada: "${normalizedDescripcion}" (${latFloat}, ${lngFloat})`);
+      console.log(`   Existente: "${similarAddress.descripcion}" (${similarAddress.latitud}, ${similarAddress.longitud})`);
+      console.log('   ✅ Reutilizando dirección existente para evitar duplicados');
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Dirección similar encontrada (mismas coordenadas)',
+        data: {
+          id: similarAddress.id,
+          city_id: similarAddress.city_id,
+          ciudad: city.nombre,
+          descripcion: similarAddress.descripcion,
+          latitud: similarAddress.latitud,
+          longitud: similarAddress.longitud
+        }
+      });
+    }
+    findSimilarStmt.free();
     
     // Validar coordenadas contra ciudad
     const validation = await geoValidationService.validarCoordenadasPorCiudad(
@@ -1361,11 +2022,10 @@ const createAddress = async (req, res) => {
     }
     
     // Crear dirección en BD
-    const db = dbService.getDatabase();
     const insertStmt = db.prepare(
       'INSERT INTO addresses (city_id, descripcion, latitud, longitud) VALUES (?, ?, ?, ?)'
     );
-    insertStmt.run([city_id, descripcion, latitud, longitud]);
+    insertStmt.run([city_id, normalizedDescripcion, latitud, longitud]);
     insertStmt.free();
     
     // Obtener el ID insertado
@@ -1403,18 +2063,143 @@ const createAddress = async (req, res) => {
   }
 };
 
+const getAvailablePeriods = async (req, res) => {
+  console.log('\n🔵 [GET AVAILABLE PERIODS] Obteniendo períodos disponibles...');
+  try {
+    // Obtener todos los registros sin filtros
+    const allRecords = await dbService.getAllRecords();
+    
+    console.log(`📊 Total registros en BD: ${allRecords.length}`);
+    if (allRecords.length > 0) {
+      console.log(`   Ejemplo primer registro fecha_inicio: ${allRecords[0].fecha_inicio}`);
+    }
+    
+    // Extraer años y meses únicos
+    const periodsSet = new Set();
+    const years = new Set();
+    
+    const collectPeriod = (rawDate) => {
+      if (!rawDate) return;
+      try {
+        const dateStr = String(rawDate).trim();
+        let date;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          const [y, m, d] = dateStr.split('-').map(Number);
+          date = new Date(Date.UTC(y, m - 1, d));
+        } else {
+          date = new Date(dateStr);
+        }
+        if (!isNaN(date)) {
+          const year = date.getUTCFullYear();
+          const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+          years.add(year);
+          periodsSet.add(`${year}-${month}`);
+          console.log(`   📅 Período encontrado: ${year}-${month} (fecha original: ${dateStr})`);
+        } else {
+          console.log(`   ⚠️  Fecha inválida: ${dateStr}`);
+        }
+      } catch (e) {
+        console.log(`   ❌ Error procesando fecha: ${rawDate} - ${e.message}`);
+      }
+    };
+
+    allRecords.forEach(record => {
+      collectPeriod(record.fecha_inicio);
+      collectPeriod(record.fecha_final);
+    });
+    
+    const sortedYears = Array.from(years).sort((a, b) => b - a);
+    const sortedPeriods = Array.from(periodsSet).sort();
+    
+    // Agrupar meses por año
+    const periodsByYear = {};
+    sortedPeriods.forEach(period => {
+      const [year, month] = period.split('-');
+      if (!periodsByYear[year]) {
+        periodsByYear[year] = [];
+      }
+      periodsByYear[year].push(month);
+    });
+
+    Object.keys(periodsByYear).forEach(year => {
+      periodsByYear[year].sort();
+    });
+    
+    console.log(`✅ Períodos encontrados: ${sortedPeriods.length} períodos en ${sortedYears.length} años`);
+    console.log(`   Años disponibles: ${sortedYears.join(', ')}`);
+    console.log(`   Períodos por año: ${JSON.stringify(periodsByYear)}`);
+    
+    res.json({
+      success: true,
+      data: {
+        years: sortedYears,
+        periodsByYear,
+        total: allRecords.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error en getAvailablePeriods:', error);
+    res.status(500).json({
+      error: 'Error al obtener períodos disponibles',
+      details: error.message
+    });
+  }
+};
+
+// ============================================
+// 📊 ESTADO OOH - Catálogo de estados (ACTIVO, BONIFICADO, CONSUMO, etc.)
+// ============================================
+
+// Obtener todos los estados
+const getAllOOHStates = async (req, res) => {
+  try {
+    const states = dbService.getAllOOHStates();
+    return res.json({ success: true, data: states });
+  } catch (error) {
+    console.error('❌ Error obteniendo estados OOH:', error);
+    return res.status(500).json({ error: 'Error obteniendo estados OOH' });
+  }
+};
+
+// Crear nuevo estado
+const createOOHState = async (req, res) => {
+  try {
+    const { nombre, descripcion } = req.body;
+    if (!nombre) {
+      return res.status(400).json({ error: 'Nombre del estado es requerido' });
+    }
+    
+    const stateId = await dbService.addOOHState(nombre.toUpperCase(), descripcion || '');
+    await dbService.saveDB();
+    
+    return res.status(201).json({ 
+      success: true, 
+      data: { 
+        id: stateId, 
+        nombre: nombre.toUpperCase(), 
+        descripcion: descripcion || '' 
+      } 
+    });
+  } catch (error) {
+    console.error('❌ Error creando estado OOH:', error);
+    return res.status(500).json({ error: 'Error creando estado OOH' });
+  }
+};
+
 module.exports = {
   initializeApp,
   createOOH,
   getAllOOH,
   getOOHById,
   generateReport,
+  getAvailablePeriods,
   getAllBrands,
   getBrandByName,
   getCampaignsByBrand,
   getAllOOHTypes,
   getOOHTypeByName,
   getAllProviders,
+  createProvider,
   getProviderByName,
   getAllCampaigns,
   getCampaignByName,
@@ -1427,5 +2212,13 @@ module.exports = {
   createCity,
   validateCityName,
   createAddress,
-  deleteOOH
+  deleteOOH,
+  syncBigQuery,
+  syncRecordToBigQuery,
+  updateChecked,
+  getAllOOHStates,
+  createOOHState,
+  getRecordImages,
+  uploadRecordImages,
+  setRecordImageRoles
 };

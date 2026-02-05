@@ -7,6 +7,7 @@ import AddProveedorModal from './AddProveedorModal';
 import AddTipoOOHModal from './AddTipoOOHModal';
 import AddDireccionModal from './AddDireccionModal';
 import AddCampanaModal from './AddCampanaModal';
+import ExcelUploader from './ExcelUploader';
 import SearchableSelect from './SearchableSelect';
 import { ciudades } from '../data/ciudades';
 import { useApp } from '../context/AppContext';
@@ -65,6 +66,7 @@ const OOHForm = ({ onSuccess }) => {
   const [showAddTipoOOHModal, setShowAddTipoOOHModal] = useState(false);
   const [showAddDireccionModal, setShowAddDireccionModal] = useState(false);
   const [showAddCampanaModal, setShowAddCampanaModal] = useState(false);
+  const [showExcelUploader, setShowExcelUploader] = useState(false);
 
   // Cargar marcas del contexto global
   useEffect(() => {
@@ -909,9 +911,19 @@ const OOHForm = ({ onSuccess }) => {
           </div>
         </div>
 
-        <button type="submit" className="submit-btn" disabled={loading}>
-          {loading ? '⏳ Guardando...' : '✓ Guardar Registro'}
-        </button>
+        <div className="form-actions">
+          <button 
+            type="button" 
+            className="excel-upload-btn"
+            onClick={() => setShowExcelUploader(true)}
+            title="Cargar múltiples registros desde Excel"
+          >
+            📊 Cargar Excel
+          </button>
+          <button type="submit" className="submit-btn" disabled={loading}>
+            {loading ? '⏳ Guardando...' : '✓ Guardar Registro'}
+          </button>
+        </div>
       </form>
 
       <AddCiudadModal 
@@ -952,6 +964,16 @@ const OOHForm = ({ onSuccess }) => {
         onAdd={handleAddCampaña}
         brands={availableMarcas}
       />
+
+      {showExcelUploader && (
+        <ExcelUploader
+          onDataLoaded={() => {
+            setShowExcelUploader(false);
+            if (onSuccess) onSuccess();
+          }}
+          onClose={() => setShowExcelUploader(false)}
+        />
+      )}
     </div>
   );
 };

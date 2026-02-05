@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS ooh_records (
       ooh_type_id INTEGER NOT NULL,
       address_id INTEGER NOT NULL,
       provider_id INTEGER NOT NULL,
+  checked INTEGER DEFAULT 0,
       fecha_inicio TEXT,
       fecha_final TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

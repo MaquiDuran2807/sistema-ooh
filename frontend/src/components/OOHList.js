@@ -3,10 +3,11 @@ import axios from 'axios';
 import './OOHList.css';
 import { useApp } from '../context/AppContext';
 import dbService from '../services/dbService';
+import RecordCard from './RecordCard';
 
-const OOHList = () => {
-  const PAGE_SIZE = 48;
-  const PREFETCH_MARGIN_PX = 600;
+const OOHList = ({ refreshTrigger }) => {
+  const PAGE_SIZE = 20;
+  const PREFETCH_MARGIN_PX = 6000; // Cargar mucho antes de llegar al final
 
   const LazyImage = ({ src, alt, className, placeholder, onError }) => {
     const imgRef = useRef(null);
@@ -22,7 +23,7 @@ const OOHList = () => {
             observer.disconnect();
           }
         },
-        { root: null, rootMargin: '300px', threshold: 0.1 }
+        { root: null, rootMargin: '1200px', threshold: 0.01 }
       );
 
       observer.observe(imgRef.current);
@@ -48,7 +49,10 @@ const OOHList = () => {
 
   const { 
     records, 
+    setRecords,
     fetchRecords, 
+    recordsPagination,
+    setRecordsPagination,
     loading: contextLoading,
     brands,
     campaigns: campaignsList,
@@ -60,7 +64,9 @@ const OOHList = () => {
   const [filteredData, setFilteredData] = useState([]);
   const [error, setError] = useState(null);
   const loadMoreRef = useRef(null);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const pageRef = useRef(1);
+  const [hasMorePages, setHasMorePages] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
   
   // Filtros
   const [searchDireccion, setSearchDireccion] = useState('');
@@ -68,23 +74,198 @@ const OOHList = () => {
   const [filterCampana, setFilterCampana] = useState('');
   const [filterFechaInicio, setFilterFechaInicio] = useState('');
   const [filterFechaFin, setFilterFechaFin] = useState('');
+  const [filterAno, setFilterAno] = useState('');
+  const [filterMes, setFilterMes] = useState('');
+  const [availablePeriods, setAvailablePeriods] = useState({ years: [], periodsByYear: {} });
+  const [filtersReady, setFiltersReady] = useState(false);
+  const [viewMode, setViewMode] = useState('cards');
   
   // Listas únicas para filtros
   const [marcas, setMarcas] = useState([]);
   const [campanas, setCampanas] = useState([]);
+  
+  // Cargar períodos disponibles al montar
+  useEffect(() => {
+    const loadPeriods = async () => {
+      try {
+        const res = await axios.get('http://localhost:8080/api/ooh/periods/available');
+        if (res.data.success) {
+          setAvailablePeriods(res.data.data);
+          if (res.data.data.years.length > 0) {
+            const now = new Date();
+            const currentYear = now.getFullYear().toString();
+            const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+            const years = res.data.data.years.map(String);
+            const hasCurrentYear = years.includes(currentYear);
+            const defaultYear = hasCurrentYear ? currentYear : years[0];
+            setFilterAno(defaultYear);
+            const monthsForYear = res.data.data.periodsByYear[defaultYear] || [];
+            const defaultMonth = monthsForYear.includes(currentMonth)
+              ? currentMonth
+              : monthsForYear[monthsForYear.length - 1];
+            if (defaultMonth) {
+              setFilterMes(defaultMonth);
+            }
+            setFiltersReady(true);
+          } else {
+            setFiltersReady(true);
+          }
+        }
+      } catch (error) {
+        console.error('Error cargando períodos disponibles:', error);
+      }
+    };
+    loadPeriods();
+  }, []);
+
+  useEffect(() => {
+    if (!filterAno) return;
+    const monthsForYear = availablePeriods.periodsByYear[filterAno] || [];
+    if (monthsForYear.length === 0) {
+      if (filterMes) {
+        setFilterMes('');
+      }
+      return;
+    }
+    if (!monthsForYear.includes(filterMes)) {
+      setFilterMes(monthsForYear[monthsForYear.length - 1]);
+    }
+  }, [filterAno, filterMes, availablePeriods.periodsByYear]);
   
   // Modal de detalles
   const [showModal, setShowModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({});
+  const [isSyncingBQ, setIsSyncingBQ] = useState(false);
+  const [syncStatus, setSyncStatus] = useState({});
   const [imageReplacements, setImageReplacements] = useState({});
+  const [showImagesModal, setShowImagesModal] = useState(false);
+  const [recordImages, setRecordImages] = useState([]);
+  const [selectedImageIds, setSelectedImageIds] = useState([]);
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [imagesError, setImagesError] = useState(null);
+  const [imagesUploading, setImagesUploading] = useState(false);
+  const [imagesSaving, setImagesSaving] = useState(false);
   
   // Selección múltiple de tarjetas
   const [selectedCards, setSelectedCards] = useState(new Set());
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [checkingStates, setCheckingStates] = useState({});
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportMonth, setReportMonth] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [reportMethod, setReportMethod] = useState('base');
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // Actualizar estado de check en un registro
+  const handleCheckedChange = useCallback((recordId, newCheckedState) => {
+    setRecords(prevRecords => 
+      prevRecords.map(r => 
+        r.id === recordId ? { ...r, checked: newCheckedState } : r
+      )
+    );
+  }, [setRecords]);
+
+  const getMaxPrimaryCount = useCallback((record) => {
+    if (!record) return 3;
+    const tipo = String(record.tipo_ooh || '').toUpperCase();
+    if (tipo.includes('CAJA') || tipo.includes('LUZ')) return 12;
+    return 3;
+  }, []);
+
+  const openImagesModal = useCallback(async () => {
+    if (!selectedRecord) return;
+    setShowImagesModal(true);
+    setImagesLoading(true);
+    setImagesError(null);
+    try {
+      const res = await axios.get(`http://localhost:8080/api/ooh/${selectedRecord.id}/images`);
+      const images = Array.isArray(res.data?.data) ? res.data.data : [];
+      setRecordImages(images);
+
+      const primaryIds = images
+        .filter(img => img.role === 'primary')
+        .sort((a, b) => (a.slot || 0) - (b.slot || 0))
+        .map(img => img.id);
+      setSelectedImageIds(primaryIds);
+    } catch (err) {
+      setImagesError(err.response?.data?.error || err.message || 'Error cargando imágenes');
+    } finally {
+      setImagesLoading(false);
+    }
+  }, [selectedRecord]);
+
+  const handleUploadMoreImages = async (files) => {
+    if (!selectedRecord || !files || files.length === 0) return;
+    setImagesUploading(true);
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach(file => formData.append('imagenes', file));
+      const res = await axios.post(`http://localhost:8080/api/ooh/${selectedRecord.id}/images/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const images = Array.isArray(res.data?.data) ? res.data.data : [];
+      setRecordImages(images);
+    } catch (err) {
+      setImagesError(err.response?.data?.error || err.message || 'Error subiendo imágenes');
+    } finally {
+      setImagesUploading(false);
+    }
+  };
+
+  const handleSavePrimaryImages = async () => {
+    if (!selectedRecord) return;
+    setImagesSaving(true);
+    try {
+      const selections = selectedImageIds.map((id, idx) => ({ id, slot: idx + 1 }));
+      const res = await axios.patch(`http://localhost:8080/api/ooh/${selectedRecord.id}/images/roles`, {
+        selections
+      });
+      const images = Array.isArray(res.data?.data) ? res.data.data : [];
+      setRecordImages(images);
+
+      const primary = images
+        .filter(img => img.role === 'primary')
+        .sort((a, b) => (a.slot || 0) - (b.slot || 0))
+        .map(img => img.ruta);
+
+      setSelectedRecord(prev => ({
+        ...prev,
+        imagen_1: primary[0] || prev.imagen_1,
+        imagen_2: primary[1] || prev.imagen_2,
+        imagen_3: primary[2] || prev.imagen_3
+      }));
+    } catch (err) {
+      setImagesError(err.response?.data?.error || err.message || 'Error guardando selección');
+    } finally {
+      setImagesSaving(false);
+    }
+  };
+
+  // Manejar el toggle de check en tabla
+  const handleCheckInTable = useCallback(async (e, recordId, currentCheckedState) => {
+    e.stopPropagation();
+    setCheckingStates(prev => ({ ...prev, [recordId]: true }));
+    try {
+      const newCheckedState = !currentCheckedState;
+      const response = await axios.patch(
+        `http://localhost:8080/api/ooh/${recordId}/check`,
+        { checked: newCheckedState }
+      );
+      if (response.data.success) {
+        handleCheckedChange(recordId, newCheckedState);
+      }
+    } catch (error) {
+      console.error('Error al actualizar check:', error);
+    } finally {
+      setCheckingStates(prev => ({ ...prev, [recordId]: false }));
+    }
+  }, [handleCheckedChange]);
 
   const resolveImageUrl = (raw) => {
       if (!raw) return null;
@@ -95,8 +276,12 @@ const OOHList = () => {
       
       const lower = val.toLowerCase();
 
-      // http/https directo
-      if (lower.startsWith('http://') || lower.startsWith('https://')) return val;
+      // http/https directo - agregar cache-busting parameter
+      if (lower.startsWith('http://') || lower.startsWith('https://')) {
+        // Agregar timestamp para evitar caché del navegador
+        const separator = val.includes('?') ? '&' : '?';
+        return `${val}${separator}v=${Date.now()}`;
+      }
 
       // Windows absoluta con backslashes
       if (/^[a-z]:\\/i.test(val) || val.includes('\\')) {
@@ -106,11 +291,11 @@ const OOHList = () => {
         if (match) {
           const startIndex = val.indexOf(match[0]) + match[0].length;
           const rel = val.substring(startIndex).replace(/\\/g, '/');
-          return `http://localhost:8080/api/images/${encodeURI(rel)}`;
+          return `http://localhost:8080/api/images/${encodeURI(rel)}?v=${Date.now()}`;
         }
         // Si no tiene local-images, tomar solo el filename como fallback
         const filename = val.split(/[/\\]/).pop();
-        return filename ? `http://localhost:8080/api/images/${encodeURI(filename)}` : null;
+        return filename ? `http://localhost:8080/api/images/${encodeURI(filename)}?v=${Date.now()}` : null;
       }
 
       // Unix absoluta
@@ -118,21 +303,47 @@ const OOHList = () => {
         const parts = val.split(/local-images/i);
         if (parts.length > 1) {
           const rel = parts[1].replace(/^\//, '');
-          return `http://localhost:8080/api/images/${encodeURI(rel)}`;
+          return `http://localhost:8080/api/images/${encodeURI(rel)}?v=${Date.now()}`;
         }
       }
 
       // Ruta relativa de API
       if (val.startsWith('/api/images')) {
-        return `http://localhost:8080${encodeURI(val)}`;
+        return `http://localhost:8080${encodeURI(val)}?v=${Date.now()}`;
       }
 
       return val;
     };
 
+  const loadPage = useCallback(async (page, append = false) => {
+    setIsFetchingMore(true);
+    try {
+      const params = { append };
+      if (filterAno && filterMes) {
+        params.mes = `${filterAno}-${filterMes}`;
+      } else if (filterAno && !filterMes) {
+        params.ano = filterAno;
+      }
+      const result = await fetchRecords(page, PAGE_SIZE, params);
+      setHasMorePages(!!result?.pagination?.hasMore);
+      pageRef.current = page;
+      return result;
+    } finally {
+      setIsFetchingMore(false);
+    }
+  }, [fetchRecords, PAGE_SIZE, filterAno, filterMes]);
+
   useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    if (!filtersReady) return;
+    if (filterAno) {
+      const monthsForYear = availablePeriods.periodsByYear[filterAno] || [];
+      if (monthsForYear.length > 0 && filterMes && !monthsForYear.includes(filterMes)) return;
+    }
+    pageRef.current = 1;
+    setRecords([]);
+    setRecordsPagination({ page: 1, limit: 20, total: 0, totalPages: 0, hasMore: false });
+    loadPage(1, false);
+  }, [loadPage, refreshTrigger, filterAno, filterMes, filtersReady, availablePeriods.periodsByYear, setRecords, setRecordsPagination]);
 
   // Actualizar datos locales cuando el contexto cambia
   useEffect(() => {
@@ -195,26 +406,65 @@ const OOHList = () => {
   }, [applyFilters]);
 
   const hasActiveFilters = !!(searchDireccion || filterMarca || filterCampana || filterFechaInicio || filterFechaFin);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const sortRecordsByDateStatus = (recordsToSort) => {
+    return [...recordsToSort].sort((a, b) => {
+      const aStart = new Date(a.fecha_inicio);
+      const aEnd = new Date(a.fecha_final);
+      const bStart = new Date(b.fecha_inicio);
+      const bEnd = new Date(b.fecha_final);
+
+      // Determinar si está activo (fecha actual entre inicio y fin)
+      const aActive = today >= aStart && today <= aEnd;
+      const bActive = today >= bStart && today <= bEnd;
+
+      // Activos primero
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+
+      // Si ambos activos o ambos inactivos, ordenar por fecha más reciente
+      return bStart - aStart; // Más reciente primero
+    });
+  };
+
   const displayData = useMemo(() => {
-    if (hasActiveFilters || filteredData.length > 0) {
-      return filteredData;
+    if (hasActiveFilters) {
+      // Ordenar solo cuando hay filtros activos
+      return sortRecordsByDateStatus(filteredData);
     }
+    // Mantener el orden del backend para evitar saltos al cargar más
     return records || [];
   }, [filteredData, records, hasActiveFilters]);
 
   const visibleRecords = useMemo(() => {
-    return displayData.slice(0, visibleCount);
-  }, [displayData, visibleCount]);
+    return displayData;
+  }, [displayData]);
 
-  const hasMoreRecords = visibleCount < displayData.length;
+  const loadedRecords = useMemo(() => {
+    return displayData;
+  }, [displayData]);
+
+  const skeletonCount = useMemo(() => {
+    if (hasActiveFilters) return 0;
+    const total = recordsPagination?.total || loadedRecords.length || 0;
+    return Math.max(total - loadedRecords.length, 0);
+  }, [hasActiveFilters, recordsPagination?.total, loadedRecords.length]);
+
+  const hasMoreRecords = !hasActiveFilters && (hasMorePages || isFetchingMore);
   const areAllVisibleSelected = useMemo(() => {
     if (visibleRecords.length === 0) return false;
     return visibleRecords.every(record => selectedCards.has(record.id));
   }, [visibleRecords, selectedCards]);
 
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [displayData, PAGE_SIZE]);
+  const totalCount = useMemo(() => {
+    if (hasActiveFilters) {
+      return displayData.length;
+    }
+    const total = recordsPagination?.total ?? 0;
+    return total;
+  }, [hasActiveFilters, displayData.length, recordsPagination?.total]);
 
   useEffect(() => {
     if (!loadMoreRef.current) return;
@@ -222,10 +472,11 @@ const OOHList = () => {
       (entries) => {
         const entry = entries[0];
         if (!entry.isIntersecting) return;
-        setVisibleCount(prev => {
-          if (prev >= displayData.length) return prev;
-          return Math.min(prev + PAGE_SIZE, displayData.length);
-        });
+        if (hasActiveFilters) return;
+        if (isFetchingMore || !hasMorePages) return;
+
+        const nextPage = pageRef.current + 1;
+        loadPage(nextPage, true);
       },
       {
         root: null,
@@ -236,7 +487,7 @@ const OOHList = () => {
 
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
-  }, [displayData.length, PAGE_SIZE, PREFETCH_MARGIN_PX]);
+  }, [PREFETCH_MARGIN_PX, hasActiveFilters, hasMorePages, isFetchingMore, loadPage]);
 
   const clearFilters = () => {
     setSearchDireccion('');
@@ -246,14 +497,26 @@ const OOHList = () => {
     setFilterFechaFin('');
   };
 
-  // Estados para el modal de reporte
-  const [showReportModal, setShowReportModal] = React.useState(false);
-  const [reportMonth, setReportMonth] = React.useState(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  });
-  const [reportMethod, setReportMethod] = React.useState('base'); // 'base' o 'scratch'
-  const [isDownloading, setIsDownloading] = React.useState(false);
+  const handleAnoChange = (e) => {
+    const newYear = e.target.value;
+    setFilterAno(newYear);
+    if (!newYear) {
+      setFilterMes('');
+      setFiltersReady(true);
+      return;
+    }
+    const monthsForYear = availablePeriods.periodsByYear[newYear] || [];
+    const lastMonth = monthsForYear[monthsForYear.length - 1] || '';
+    setFilterMes(lastMonth);
+    setFiltersReady(true);
+    pageRef.current = 1;
+  };
+
+  const handleMesChange = (e) => {
+    setFilterMes(e.target.value);
+    setFiltersReady(true);
+    pageRef.current = 1;
+  };
 
   const openReportModal = () => {
     setShowReportModal(true);
@@ -341,6 +604,46 @@ const OOHList = () => {
     setEditMode(false);
     setEditData({});
     setImageReplacements({});
+    setIsSyncingBQ(false);
+  };
+
+  // Sincronizar registro individual a BigQuery
+  const syncToBigQuery = async () => {
+    if (!selectedRecord?.id) {
+      alert('⚠️ No hay registro seleccionado');
+      return;
+    }
+
+    setIsSyncingBQ(true);
+    try {
+      const response = await axios.post(
+        `http://localhost:8080/api/ooh/${selectedRecord.id}/sync-bigquery`
+      );
+
+      if (response.data.success) {
+        setSyncStatus(prev => ({
+          ...prev,
+          [selectedRecord.id]: {
+            synced: true,
+            syncedAt: response.data.data.synced_to_bigquery
+          }
+        }));
+        alert('✅ Registro sincronizado a BigQuery exitosamente');
+        // Actualizar el registro en la lista
+        setSelectedRecord(prev => ({
+          ...prev,
+          synced_to_bigquery: response.data.data.synced_to_bigquery,
+          bq_sync_status: 'synced'
+        }));
+      } else {
+        alert(`❌ Error: ${response.data.error}`);
+      }
+    } catch (error) {
+      console.error('Error sincronizando a BigQuery:', error);
+      alert(`❌ Error al sincronizar: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setIsSyncingBQ(false);
+    }
   };
 
   // Manejar selección de tarjetas
@@ -426,7 +729,8 @@ const OOHList = () => {
       closeDeleteConfirmModal();
 
       // Recargar datos
-      fetchRecords();
+      pageRef.current = 1;
+      loadPage(1, false);
     } catch (error) {
       console.error('Error eliminando registros:', error);
       alert('❌ Error al eliminar los registros');
@@ -520,7 +824,8 @@ const OOHList = () => {
         console.log('✅ [ACTUALIZAR] Registro actualizado exitosamente:', response.data);
         alert('✅ Registro actualizado correctamente');
         setEditMode(false);
-        fetchRecords(); // Recargar datos
+        pageRef.current = 1;
+        loadPage(1, false); // Recargar datos
         closeModal();
       }
     } catch (error) {
@@ -564,7 +869,7 @@ const OOHList = () => {
     return (
       <div className="error-container">
         <p className="error-message">⚠️ {error}</p>
-        <button onClick={fetchRecords} className="retry-btn">
+        <button onClick={() => loadPage(1, false)} className="retry-btn">
           Reintentar
         </button>
       </div>
@@ -583,7 +888,7 @@ const OOHList = () => {
   return (
     <div className="ooh-list-container">
       <div className="list-header">
-        <h2>Registros OOH ({visibleRecords.length} de {displayData.length})</h2>
+        <h2>Registros OOH ({visibleRecords.length} de {totalCount})</h2>
         <div className="header-buttons">
           {selectedCards.size > 0 && (
             <>
@@ -607,6 +912,13 @@ const OOHList = () => {
               </button>
             </>
           )}
+          <button
+            onClick={() => setViewMode(viewMode === 'cards' ? 'table' : 'cards')}
+            className="btn-secondary"
+            title="Cambiar vista"
+          >
+            {viewMode === 'cards' ? '🗂️ Ver tabla' : '🖼️ Ver tarjetas'}
+          </button>
           <button onClick={openReportModal} className="report-btn" title="Generar Reporte PPT de VALLAS">
             📄 Generar Reporte PPT
           </button>
@@ -629,6 +941,39 @@ const OOHList = () => {
         </div>
 
         <div className="filters-row">
+          <select 
+            value={filterAno} 
+            onChange={handleAnoChange}
+            className="filter-select"
+            title="Filtrar por año"
+          >
+            <option value="">Todos los años</option>
+            {availablePeriods.years.map((ano) => (
+              <option key={ano} value={ano}>{ano}</option>
+            ))}
+          </select>
+
+          <select 
+            value={filterMes} 
+            onChange={handleMesChange}
+            className="filter-select"
+            title="Filtrar por mes"
+          >
+            <option value="">Todos los meses</option>
+            {filterAno && availablePeriods.periodsByYear[filterAno] ? (
+              availablePeriods.periodsByYear[filterAno].map((mes) => {
+                const mesesLabel = {
+                  '01': 'Enero', '02': 'Febrero', '03': 'Marzo', '04': 'Abril',
+                  '05': 'Mayo', '06': 'Junio', '07': 'Julio', '08': 'Agosto',
+                  '09': 'Septiembre', '10': 'Octubre', '11': 'Noviembre', '12': 'Diciembre'
+                };
+                return (
+                  <option key={mes} value={mes}>{mesesLabel[mes]}</option>
+                );
+              })
+            ) : null}
+          </select>
+
           <select 
             value={filterMarca} 
             onChange={(e) => setFilterMarca(e.target.value)}
@@ -682,112 +1027,97 @@ const OOHList = () => {
             Limpiar filtros
           </button>
         </div>
+      ) : viewMode === 'table' ? (
+        <div className="records-table-wrapper">
+          <table className="records-table">
+            <thead>
+              <tr>
+                <th>Marca</th>
+                <th>Campaña</th>
+                <th>Categoría</th>
+                <th>Ciudad</th>
+                <th>Dirección</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Tipo OOH</th>
+                <th>Proveedor</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadedRecords.map((record) => (
+                <tr key={record.id} className="records-table-row" onClick={() => openModal(record)}>
+                  <td>{record.marca || '-'}</td>
+                  <td>{record.campana || '-'}</td>
+                  <td>{record.categoria || '-'}</td>
+                  <td>{record.ciudad || '-'}</td>
+                  <td>{record.direccion || '-'}</td>
+                  <td>{formatDate(record.fecha_inicio)}</td>
+                  <td>{formatDate(record.fecha_final)}</td>
+                  <td>{record.tipo_ooh || '-'}</td>
+                  <td>{record.proveedor || '-'}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button 
+                      className={`check-btn-table ${record.checked ? 'checked' : ''} ${checkingStates[record.id] ? 'loading' : ''}`}
+                      onClick={(e) => handleCheckInTable(e, record.id, record.checked)}
+                      disabled={checkingStates[record.id]}
+                      title={record.checked ? 'Desmarcar como chequeado' : 'Marcar como chequeado'}
+                    >
+                      {record.checked ? '✓ Chequeado' : '○ Chequear'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {hasMoreRecords && !hasActiveFilters && (
+            <div ref={loadMoreRef} className="load-more-sentinel">
+              <div className="load-more-spinner" />
+              <span>Cargando más registros...</span>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="records-grid">
-          {visibleRecords.map((record, index) => {
-            // Extraer datos del objeto (desde BD) o array (legacy)
-            const marca = typeof record === 'object' && !Array.isArray(record) ? record.marca : record[2];
-            const categoria = typeof record === 'object' && !Array.isArray(record) ? record.categoria : record[3];
-            const campana = typeof record === 'object' && !Array.isArray(record) ? record.campana : record[5];
-            const direccion = typeof record === 'object' && !Array.isArray(record) ? record.direccion : record[6];
-            const ciudad = typeof record === 'object' && !Array.isArray(record) ? record.ciudad : record[7];
-            const img1 = typeof record === 'object' && !Array.isArray(record) ? record.imagen_1 : record[11];
-            const img2 = typeof record === 'object' && !Array.isArray(record) ? record.imagen_2 : record[12];
-            const img3 = typeof record === 'object' && !Array.isArray(record) ? record.imagen_3 : record[13];
-            const fechaInicio = typeof record === 'object' && !Array.isArray(record) ? record.fecha_inicio : record[14];
-            const fechaFin = typeof record === 'object' && !Array.isArray(record) ? record.fecha_final : record[15];
-            
-            const url1 = resolveImageUrl(img1);
+          {loadedRecords.map((record) => {
             const isSelected = selectedCards.has(record.id);
-            
             return (
-              <div key={index} className={`record-card ${isSelected ? 'selected' : ''}`} onClick={() => {
-                if (selectedCards.size > 0) {
-                  toggleCardSelection(record.id);
-                }
-              }}>
-                {/* Checkbox de selección */}
-                <div className="card-select-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      toggleCardSelection(record.id);
-                    }}
-                    className="card-checkbox"
-                  />
-                </div>
-
-                {/* Imagen destacada */}
-                <div className="card-image">
-                  {url1 ? (
-                    <LazyImage
-                      src={url1}
-                      alt={`${marca} - ${campana}`}
-                      placeholder={null}
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="150"%3E%3Crect fill="%23ddd" width="200" height="150"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3ESin imagen%3C/text%3E%3C/svg%3E';
-                      }}
-                    />
-                  ) : (
-                    <div className="no-image">📷 Sin imagen</div>
-                  )}
-                </div>
-
-                <div className="card-content">
-                  <div className="card-header">
-                    <h3>{marca}</h3>
-                    <span className="campaign-badge">{campana}</span>
-                  </div>
-
-                  <div className="card-body">
-                    <div className="record-field">
-                      <strong>📦</strong>
-                      <span>{categoria}</span>
-                    </div>
-
-                    <div className="record-field">
-                      <strong>📍</strong>
-                      <span>{direccion}</span>
-                    </div>
-
-                    <div className="record-field">
-                      <strong>🏙️</strong>
-                      <span>{ciudad}</span>
-                    </div>
-
-                    <div className="record-field">
-                      <strong>📅</strong>
-                      <span>
-                        {formatDate(fechaInicio)} - {formatDate(fechaFin)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="card-footer">
-                    <div className="images-count">
-                      📸 {[img1, img2, img3].filter(Boolean).length} fotos
-                    </div>
-                    <button 
-                      className="view-details-btn"
-                      onClick={() => openModal(record)}
-                    >
-                      Ver más
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <RecordCard
+                key={record.id}
+                record={record}
+                isSelected={isSelected}
+                onSelect={toggleCardSelection}
+                onOpenModal={openModal}
+                formatDate={formatDate}
+                resolveImageUrl={resolveImageUrl}
+                LazyImage={LazyImage}
+                toggleCardSelection={toggleCardSelection}
+                onCheckedChange={handleCheckedChange}
+              />
             );
           })}
-        </div>
-      )}
 
-      {hasMoreRecords && (
-        <div ref={loadMoreRef} className="load-more-sentinel">
-          <div className="load-more-spinner" />
-          <span>Cargando más registros...</span>
+          {hasMoreRecords && !hasActiveFilters && (
+            <div ref={loadMoreRef} className="load-more-sentinel">
+              <div className="load-more-spinner" />
+              <span>Cargando más registros...</span>
+            </div>
+          )}
+
+          {!hasActiveFilters && skeletonCount > 0 &&
+            Array.from({ length: skeletonCount }).map((_, idx) => (
+              <div key={`skeleton-${idx}`} className="record-card skeleton">
+                <div className="card-image skeleton-block" />
+                <div className="card-content">
+                  <div className="skeleton-line title" />
+                  <div className="skeleton-line" />
+                  <div className="skeleton-line" />
+                  <div className="skeleton-line" />
+                  <div className="skeleton-line short" />
+                </div>
+              </div>
+            ))}
         </div>
       )}
 
@@ -985,7 +1315,16 @@ const OOHList = () => {
 
               {/* Galería de imágenes - Las 3 imágenes */}
               <div className="modal-gallery">
-                <h3>📸 Todas las imágenes ({[selectedRecord.imagen_1, selectedRecord.imagen_2, selectedRecord.imagen_3].filter(Boolean).length}/3)</h3>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h3>📸 Todas las imágenes ({[selectedRecord.imagen_1, selectedRecord.imagen_2, selectedRecord.imagen_3].filter(Boolean).length}/3)</h3>
+                  <button
+                    className="btn-secondary"
+                    type="button"
+                    onClick={openImagesModal}
+                  >
+                    ➕ Ver más fotos
+                  </button>
+                </div>
                 
                 <div className="gallery-grid">
                   {[
@@ -1057,10 +1396,33 @@ const OOHList = () => {
             <div className="modal-footer">
               {!editMode ? (
                 <>
-                  <button className="modal-btn btn-edit" onClick={() => setEditMode(true)}>
-                    ✏️ Editar
-                  </button>
-                  <button className="modal-btn btn-cancel" onClick={closeModal}>Cerrar</button>
+                  <div className="footer-left">
+                    <div className="sync-status">
+                      {selectedRecord?.synced_to_bigquery ? (
+                        <>
+                          <span>✅ Sincronizado a BigQuery</span>
+                          <small>{new Date(selectedRecord.synced_to_bigquery).toLocaleString()}</small>
+                        </>
+                      ) : (
+                        <>
+                          <span>⏳ Pendiente de sincronizar</span>
+                          <button 
+                            className="modal-btn btn-confirm" 
+                            onClick={syncToBigQuery}
+                            disabled={isSyncingBQ}
+                          >
+                            {isSyncingBQ ? '⏳ Sincronizando...' : '✓ Confirmar a BigQuery'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="footer-right">
+                    <button className="modal-btn btn-edit" onClick={() => setEditMode(true)}>
+                      ✏️ Editar
+                    </button>
+                    <button className="modal-btn btn-cancel" onClick={closeModal}>Cerrar</button>
+                  </div>
                 </>
               ) : (
                 <>
@@ -1071,6 +1433,91 @@ const OOHList = () => {
                     ❌ Cancelar
                   </button>
                 </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImagesModal && selectedRecord && (
+        <div className="modal-overlay" onClick={() => setShowImagesModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📸 Galería completa - {selectedRecord.marca} - {selectedRecord.campana}</h2>
+              <button className="modal-close" onClick={() => setShowImagesModal(false)}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
+                Puedes subir varias imágenes y elegir las principales. {getMaxPrimaryCount(selectedRecord)} principales permitidas para este tipo.
+              </div>
+
+              {imagesError && (
+                <div className="error-message">❌ {imagesError}</div>
+              )}
+
+              <div style={{ marginBottom: '12px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <label className="btn-secondary" style={{ cursor: imagesUploading ? 'not-allowed' : 'pointer' }}>
+                  📤 Subir más fotos
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                    disabled={imagesUploading}
+                    onChange={(e) => handleUploadMoreImages(e.target.files)}
+                  />
+                </label>
+                {imagesUploading && <span>Subiendo...</span>}
+                <button
+                  className="btn-primary"
+                  onClick={handleSavePrimaryImages}
+                  disabled={imagesSaving || selectedImageIds.length === 0}
+                >
+                  {imagesSaving ? 'Guardando...' : '💾 Guardar principales'}
+                </button>
+              </div>
+
+              {imagesLoading ? (
+                <div>Cargando imágenes...</div>
+              ) : (
+                <div className="gallery-grid">
+                  {recordImages.map((img) => {
+                    const isSelected = selectedImageIds.includes(img.id);
+                    return (
+                      <div key={img.id} className="gallery-item">
+                        <LazyImage
+                          src={resolveImageUrl(img.ruta)}
+                          alt={`Imagen ${img.id}`}
+                          onError={(e) => {
+                            e.target.onerror = null;
+                            e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100%25" height="200"%3E%3Crect fill="%23ddd" width="100%25" height="200"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999" font-size="14"%3ESin imagen%3C/text%3E%3C/svg%3E';
+                          }}
+                        />
+                        <div className="gallery-item-label" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '12px' }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                const maxPrimary = getMaxPrimaryCount(selectedRecord);
+                                if (e.target.checked && selectedImageIds.length >= maxPrimary) {
+                                  return;
+                                }
+                                const next = new Set(selectedImageIds);
+                                if (e.target.checked) next.add(img.id);
+                                else next.delete(img.id);
+                                setSelectedImageIds(Array.from(next));
+                              }}
+                            />{' '}
+                            Principal {isSelected ? `(${selectedImageIds.indexOf(img.id) + 1})` : ''}
+                          </label>
+                          <span style={{ fontSize: '10px', color: '#666' }}>Subida: {img.created_at}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>

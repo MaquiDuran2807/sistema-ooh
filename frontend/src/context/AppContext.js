@@ -19,6 +19,13 @@ export const AppProvider = ({ children }) => {
   
   // Datos transaccionales
   const [records, setRecords] = useState([]);
+  const [recordsPagination, setRecordsPagination] = useState({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+    hasMore: false
+  });
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
@@ -28,7 +35,9 @@ export const AppProvider = ({ children }) => {
     try {
       console.log('🚀 Inicializando app... URL:', API_URL);
       const startTime = performance.now();
-      const res = await axios.get(`${API_URL}/api/ooh/initialize`);
+      const res = await axios.get(`${API_URL}/api/ooh/initialize`, {
+        params: { includeRecords: false }
+      });
       const endTime = performance.now();
       const requestTime = (endTime - startTime).toFixed(2);
       
@@ -62,8 +71,7 @@ export const AppProvider = ({ children }) => {
           cities = [],
           addresses = [],
           providers = [],
-          regions = [],
-          records = []
+          regions = []
         } = res.data.data;
         
         setBrands(brands);
@@ -75,7 +83,14 @@ export const AppProvider = ({ children }) => {
         setAddresses(addresses);
         setProviders(providers);
         setRegions(regions);
-        setRecords(records);
+        setRecords([]);
+        setRecordsPagination({
+          page: 1,
+          limit: 20,
+          total: 0,
+          totalPages: 0,
+          hasMore: false
+        });
         
         console.log('📈 RESUMEN DATOS CARGADOS:', {
           brands: brands.length,
@@ -86,8 +101,7 @@ export const AppProvider = ({ children }) => {
           cities: cities.length,
           addresses: addresses.length,
           providers: providers.length,
-          regions: regions.length,
-          records: records.length
+          regions: regions.length
         });
         
         // Log detallado de cada tipo de dato
@@ -100,7 +114,7 @@ export const AppProvider = ({ children }) => {
         console.log('📍 ADDRESSES:', addresses);
         console.log('🏭 PROVIDERS:', providers);
         console.log('🗺️ REGIONS:', regions);
-        console.log('📊 RECORDS:', records);
+        console.log('📊 RECORDS: (carga paginada)');
         
         setInitialized(true);
       } else {
@@ -187,16 +201,34 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   // Cargar todos los registros con paginación
-  const fetchRecords = useCallback(async (page = 1, limit = 1000) => {
+  const fetchRecords = useCallback(async (page = 1, limit = 20, options = {}) => {
     setLoading(true);
     try {
-      console.log(`📄 Cargando registros: page=${page}, limit=${limit}`);
-      const res = await axios.get(`${API_URL}/api/ooh/all`, {
-        params: { page, limit }
-      });
+      const params = { page, limit };
+      if (options.mes) {
+        params.mes = options.mes;
+      }
+      if (options.ano) {
+        params.ano = options.ano;
+      }
+      console.log(`📄 Cargando registros: page=${page}, limit=${limit}, mes=${options.mes}`);
+      const res = await axios.get(`${API_URL}/api/ooh/all`, { params });
       if (res.data.success) {
-        console.log(`✅ Registros cargados: ${res.data.data.length} de ${res.data.pagination?.total || 'N/A'}`);
-        setRecords(res.data.data);
+        const append = options.append === true;
+        setRecords(prev => {
+          if (!append) return res.data.data;
+          const combined = [...prev, ...res.data.data];
+          const seen = new Set();
+          return combined.filter(item => {
+            if (!item?.id) return false;
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+        });
+        if (res.data.pagination) {
+          setRecordsPagination(res.data.pagination);
+        }
         return {
           data: res.data.data,
           pagination: res.data.pagination
@@ -343,6 +375,9 @@ export const AppProvider = ({ children }) => {
     
     // Datos transaccionales
     records,
+    setRecords,
+    recordsPagination,
+    setRecordsPagination,
     loading,
     initialized,
     

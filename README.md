@@ -1,6 +1,6 @@
 # 🎯 Sistema de Gestión OOH - Vallas Publicitarias Colombia
 
-Sistema integral para gestionar vallas publicitarias (Out of Home) con arquitectura ID-based, validación geográfica, lazy loading y generación automática de reportes PPT.
+Sistema integral para gestionar vallas publicitarias (Out of Home) con arquitectura ID-based, validación geográfica, lazy loading, integración con **Google Cloud Platform** (Cloud Storage + BigQuery) y generación automática de reportes PPT.
 
 ---
 
@@ -22,6 +22,18 @@ Sistema integral para gestionar vallas publicitarias (Out of Home) con arquitect
 - **34 ciudades colombianas**: Con coordenadas y radio de cobertura
 - **Storage local**: Imágenes organizadas por marca/campaña/mes
 
+### ☁️ Integración con Google Cloud Platform (Opcional)
+- **Cloud Storage**: Almacenamiento escalable de imágenes con organización jerárquica
+  - Estructura: `ooh-images/{MARCA}/{RECORD_ID}/imagen_X.jpg`
+  - URLs públicas para acceso rápido
+  - Metadata en archivos (marca, recordId, fecha)
+- **BigQuery**: Almacenamiento de datos completos (no relacional)
+  - Dataset: `ooh_dataset`
+  - Tabla: `ooh_records` con esquema completo
+  - Consultas SQL para análisis y reportes
+  - Campo JSON con registro completo para flexibilidad
+- **Arquitectura Híbrida**: SQLite local + GCP cloud (configurable)
+
 ---
 
 ## 🚀 Inicio Rápido
@@ -30,6 +42,7 @@ Sistema integral para gestionar vallas publicitarias (Out of Home) con arquitect
 - Node.js 18+
 - Python 3.8+ (para reportes PPT)
 - npm o yarn
+- **(Opcional)** Cuenta de Google Cloud Platform para Cloud Storage y BigQuery
 
 ### Instalación
 
@@ -43,7 +56,16 @@ pip install python-pptx
 cd backend
 node create-database.js
 
-# 3. Iniciar servicios
+# 3. (Opcional) Configurar GCP
+# Sigue la guía: GCP_SETUP_GUIDE.md
+cd backend
+.\setup-env.bat        # Windows
+# o edita manualmente .env
+
+# 4. (Opcional) Inicializar BigQuery
+npm run init:bigquery
+
+# 5. Iniciar servicios
 # Terminal 1 - Backend
 cd backend && npm start
 
@@ -52,6 +74,57 @@ cd frontend && npm start
 ```
 
 Acceso: **http://localhost:3000**
+
+---
+
+## ☁️ Configuración de Google Cloud Platform
+
+Para usar Cloud Storage y BigQuery, consulta la guía completa:
+
+📖 **[Guía de Configuración de GCP](./GCP_SETUP_GUIDE.md)**
+
+### Configuración Rápida
+
+1. **Crea una cuenta de servicio** en GCP con permisos:
+   - Storage Admin
+   - BigQuery Admin
+
+2. **Descarga el archivo JSON** de credenciales
+
+3. **Configura el backend**:
+   ```bash
+   cd backend
+   .\setup-env.bat  # Script interactivo
+   ```
+
+4. **Variables de entorno** en `.env`:
+   ```env
+   # Activar servicios de GCP
+   USE_GCS=true
+   USE_BIGQUERY=true
+   
+   # Configuración
+   GCP_PROJECT_ID=tu-proyecto-id
+   GCP_STORAGE_BUCKET=ooh-images-prod
+   GCP_KEY_FILE=./config/service-account-key.json
+   BQ_DATASET_ID=ooh_dataset
+   BQ_TABLE_ID=ooh_records
+   ```
+
+5. **Inicializa BigQuery**:
+   ```bash
+   npm run init:bigquery
+   ```
+
+### Modos de Operación
+
+- **Modo Local** (`USE_GCS=false`, `USE_BIGQUERY=false`): Solo SQLite y almacenamiento local
+- **Modo Cloud** (`USE_GCS=true`, `USE_BIGQUERY=true`): GCS + BigQuery + SQLite local
+- **Modo Híbrido**: Cualquier combinación según necesites
+
+📚 **Documentos de GCP**:
+- [GCP_SETUP_GUIDE.md](./GCP_SETUP_GUIDE.md) - Guía completa de configuración
+- [GCP_INTEGRATION_SUMMARY.md](./GCP_INTEGRATION_SUMMARY.md) - Resumen de integración
 
 ---
 
@@ -80,6 +153,8 @@ nuevo-ooh/
 │   │   └── ooh.js                      # Rutas API
 │   ├── services/
 │   │   ├── dbService.js                # SQLite (11 tablas normalizadas)
+│   │   ├── gcsService.js               # ☁️ Google Cloud Storage
+│   │   ├── bigQueryService.js          # ☁️ BigQuery para datos completos
 │   │   ├── geoValidationService.js     # Validación coordenadas con geolib
 │   │   ├── localStorageService.js      # Gestión de imágenes local
 │   │   └── pptService.js               # Generación PPT
@@ -91,9 +166,16 @@ nuevo-ooh/
 │   │   ├── geo-validation.test.js      # Tests validación geográfica
 │   │   ├── images.test.js              # Tests imágenes
 │   │   └── cities-integration.test.js  # Tests ciudades
+│   ├── config/                         # ☁️ Credenciales GCP (NO en Git)
+│   │   └── service-account-key.json    # Archivo de cuenta de servicio
 │   ├── ooh_data.db                     # Base de datos SQLite
+│   ├── .env.example                    # Variables de entorno (incluye GCP)
+│   ├── setup-env.bat                   # ☁️ Script de configuración
+│   ├── init-bigquery.js                # ☁️ Inicializar BigQuery
 │   └── package.json
 │
+├── GCP_SETUP_GUIDE.md                  # ☁️ Guía completa de configuración GCP
+├── GCP_INTEGRATION_SUMMARY.md          # ☁️ Resumen de integración
 ├── README.md                           # Este archivo
 └── TESTS_GUIDE.md                      # Guía de tests
 ```
@@ -335,6 +417,8 @@ node migrate-csv-to-db.js            # Importar desde CSV
 - `sql.js` ^1.10.3
 - `geolib` ^3.3.4
 - `multer` ^1.4.5
+- `@google-cloud/storage` ^6.10.0 ☁️
+- `@google-cloud/bigquery` ^7.3.0 ☁️
 
 ### Dev/Test
 - `jest` ^29.7.0
@@ -344,7 +428,7 @@ node migrate-csv-to-db.js            # Importar desde CSV
 
 ## 🚦 Estado del Proyecto
 
-**Versión**: 2.0  
+**Versión**: 2.1  
 **Última actualización**: Febrero 2026
 
 ### Completado ✅
@@ -354,6 +438,16 @@ node migrate-csv-to-db.js            # Importar desde CSV
 - Auto-fill de formularios
 - Tests completos (5 suites)
 - Generación PPT con plantilla
+- ☁️ Integración con Google Cloud Storage
+- ☁️ Integración con BigQuery
+- ☁️ Arquitectura híbrida local/cloud
+
+### Próximas Mejoras 🔜
+- Dashboard de analytics con Looker Studio
+- Migración automática de datos locales a BigQuery
+- Compresión automática de imágenes
+- CDN con Cloud CDN
+- Autenticación con Firebase Auth
 
 ---
 

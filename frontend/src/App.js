@@ -61,7 +61,7 @@ function AppContent() {
 
       <div className="tab-content">
         {activeTab === 'form' && <OOHForm onSuccess={handleFormSuccess} />}
-        {activeTab === 'list' && <OOHList key={refreshList} />}
+        {activeTab === 'list' && <OOHList refreshTrigger={refreshList} />}
       </div>
 
       <DebugPanel />
