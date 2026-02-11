@@ -274,6 +274,31 @@
   transition: all 0.3s ease;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.record-card.needs-review {
+  border-color: #ff9800;
+  background: #fff8f0;
+}
+
+.record-card.needs-review:hover {
+  border-color: #ff6f00;
+  box-shadow: 0 15px 35px rgba(255, 152, 0, 0.2);
+}
+
+.review-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #ff9800;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85em;
+  font-weight: bold;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
 }
 
 .record-card:hover {
@@ -653,6 +678,20 @@
 .detail-row span {
   color: #333;
   word-break: break-word;
+}
+
+.detail-row.review-warning {
+  background: #fff3e0;
+  border-left-color: #ff9800;
+}
+
+.detail-row.review-warning strong {
+  color: #e65100;
+}
+
+.detail-row.review-warning span {
+  color: #bf360c;
+  font-weight: 500;
 }
 
 .modal-gallery {
@@ -1258,6 +1297,25 @@
   100% {
     background-position: -200% 0;
   }
+}
+
+/* Skeleton rows para tabla */
+.skeleton-row {
+  pointer-events: none;
+  opacity: 0.6;
+  background: #fafafa;
+}
+
+.skeleton-row td {
+  padding: 12px;
+}
+
+.skeleton-row .skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #eee 25%, #f5f5f5 50%, #eee 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
 }
 
 .card-select-checkbox {

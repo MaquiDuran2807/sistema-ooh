@@ -49,6 +49,77 @@ const normalizeForComparison = (str) => {
     .trim();
 };
 
+const KM_PER_DEGREE_LAT = 111.32;
+
+const getKmPerDegreeLong = (lat) => {
+  return KM_PER_DEGREE_LAT * Math.cos(lat * Math.PI / 180);
+};
+
+const generateRandomCoordsNearCity = (city) => {
+  if (!city) return null;
+  const centerLat = parseFloat(city.latitud);
+  const centerLng = parseFloat(city.longitud);
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return null;
+
+  const rawRadio = city.radio_km ?? city.radioKm;
+  const radioKm = Number.isFinite(parseFloat(rawRadio)) ? parseFloat(rawRadio) : 10;
+
+  const maxRadiusKm = Math.max(0.5, radioKm * 0.5);
+  const minRadiusKm = Math.max(0.2, maxRadiusKm * 0.2);
+  const minRadiusSq = minRadiusKm * minRadiusKm;
+  const maxRadiusSq = maxRadiusKm * maxRadiusKm;
+  const distanceKm = Math.sqrt(Math.random() * (maxRadiusSq - minRadiusSq) + minRadiusSq);
+  const angle = Math.random() * Math.PI * 2;
+
+  const deltaLat = (distanceKm * Math.cos(angle)) / KM_PER_DEGREE_LAT;
+  const kmPerDegLong = getKmPerDegreeLong(centerLat);
+  const deltaLng = kmPerDegLong ? (distanceKm * Math.sin(angle)) / kmPerDegLong : 0;
+
+  return {
+    lat: centerLat + deltaLat,
+    lng: centerLng + deltaLng
+  };
+};
+
+const applyFallbackCoordinates = (record, city) => {
+  const hasLat = Number.isFinite(parseFloat(record.latitud));
+  const hasLng = Number.isFinite(parseFloat(record.longitud));
+  if (hasLat && hasLng) return null;
+
+  const generated = generateRandomCoordsNearCity(city);
+  if (!generated) return null;
+
+  record.latitud = Number(generated.lat.toFixed(6));
+  record.longitud = Number(generated.lng.toFixed(6));
+  return `Coordenadas generadas cerca al centro de la ciudad "${city?.nombre || 'desconocida'}" porque estaban en blanco`;
+};
+
+const checkCoordinateOutOfRange = (record, city) => {
+  if (!city) return null;
+  const centerLat = parseFloat(city.latitud);
+  const centerLng = parseFloat(city.longitud);
+  const radioKm = parseFloat(city.radio_km ?? city.radioKm ?? 10);
+
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return null;
+
+  const lat = parseFloat(record.latitud);
+  const lng = parseFloat(record.longitud);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const latDelta = Math.abs(lat - centerLat);
+  const lngDelta = Math.abs(lng - centerLng);
+
+  const maxLatDelta = radioKm / KM_PER_DEGREE_LAT;
+  const kmPerDegLong = getKmPerDegreeLong(centerLat);
+  const maxLngDelta = kmPerDegLong ? radioKm / kmPerDegLong : 0;
+
+  const isOutOfRange = latDelta > maxLatDelta || lngDelta > maxLngDelta;
+  if (!isOutOfRange) return null;
+
+  const approxDistKm = Math.sqrt(latDelta * latDelta + lngDelta * lngDelta) * KM_PER_DEGREE_LAT;
+  return `Coordenadas erradas: fuera de la ciudad, ~${approxDistKm.toFixed(1)} km del centro`;
+};
+
 // 🔍 UTILIDAD: Buscar ciudad más similar en array de ciudades
 const findMostSimilarCity = (searchName, cities, threshold = 85) => {
   const normalizedSearch = normalizeForComparison(searchName);
@@ -89,7 +160,7 @@ const findMostSimilarCity = (searchName, cities, threshold = 85) => {
   return null;
 };
 
-const ExcelUploader = ({ onDataLoaded, onClose }) => {
+const ExcelUploader = ({ regions = [], onDataLoaded, onClose }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [records, setRecords] = useState([]);
@@ -195,7 +266,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
       onClose();
     } else {
       setImportSummary({
-        success: successCount - failed.length,
+        success: successCount,
         failed: failed.length,
         geoErrors: failed.filter(f => f.reason.includes('Coordenadas fuera del rango') || f.reason.includes('coordenadas')).length
       });
@@ -333,8 +404,8 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
           // Convertir a JSON sin encabezados automáticos para detectar dónde están
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
           
-          console.log('📊 [EXCEL] Filas totales:', jsonData.length);
-          console.log('📊 [EXCEL] Primeras 5 filas:', jsonData.slice(0, 5));
+          // console.log('📊 [EXCEL] Filas totales:', jsonData.length);
+          // console.log('📊 [EXCEL] Primeras 5 filas:', jsonData.slice(0, 5));
           
           if (jsonData.length < 2) {
             setError('El archivo debe tener al menos encabezados y 1 registro de datos');
@@ -352,7 +423,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
             const hasKeys = ['MARCA', 'CIUDAD', 'ESTADO', 'TIPO'].filter(k => rowStr.includes(k));
             if (hasKeys.length >= 2) {
               headerRowIndex = i;
-              console.log('🎯 [EXCEL] Headers detectados en fila', i, '- Palabras clave encontradas:', hasKeys);
+              // console.log('🎯 [EXCEL] Headers detectados en fila', i, '- Palabras clave encontradas:', hasKeys);
               break;
             }
           }
@@ -369,8 +440,8 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
             Array.isArray(row) && row.length > 0 && row.some(cell => cell != null && cell !== '')
           );
 
-          console.log('📋 [EXCEL] Headers (fila', headerRowIndex, '):', headers);
-          console.log('📊 [EXCEL] Filas de datos a procesar:', dataRows.length);
+          // console.log('📋 [EXCEL] Headers (fila', headerRowIndex, '):', headers);
+          // console.log('📊 [EXCEL] Filas de datos a procesar:', dataRows.length);
 
           // Crear mapeo flexible de columnas (case-insensitive)
           const findColumnIndex = (headerList, keywords) => {
@@ -385,20 +456,20 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
                 return hClean.includes(kUpper);
               });
               if (matched) {
-                console.log(`✅ [EXCEL] Columna encontrada: "${h}" matcheó con keywords:`, keywords);
+                // console.log(`✅ [EXCEL] Columna encontrada: "${h}" matcheó con keywords:`, keywords);
               }
               return matched;
             });
             
             if (foundIndex === -1) {
-              console.log(`⚠️ [EXCEL] Columna NO encontrada con keywords:`, keywords);
+              // console.log(`⚠️ [EXCEL] Columna NO encontrada con keywords:`, keywords);
             }
             
             return foundIndex;
           };
 
-          console.log('📋 [EXCEL] Headers RAW (antes de mapear):', headers);
-          console.log('📋 [EXCEL] Total de columnas:', headers.length);
+          // console.log('📋 [EXCEL] Headers RAW (antes de mapear):', headers);
+          // console.log('📋 [EXCEL] Total de columnas:', headers.length);
 
           // Encontrar índices de columnas clave CON PRIORIDAD EN ORDEN
           const colEstado = findColumnIndex(headers, ['ESTADO']);
@@ -413,21 +484,21 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
           const colLongitud = findColumnIndex(headers, ['LONGITUD']);
           const colFoto = findColumnIndex(headers, ['FOTO']);
 
-          console.log('\n🔍 [EXCEL] ===== RESUMEN DE MAPEO DE COLUMNAS =====');
-          console.log('🔍 [EXCEL] Índices encontrados:', {
-            estado: colEstado,
-            marca: colMarca,
-            tipo: colTipo,
-            proveedor: colProveedor,
-            ciudad: colCiudad,
-            direccion: colDireccion,
-            fechaInicio: colFechaInicio,
-            fechaFin: colFechaFin,
-            latitud: colLatitud,
-            longitud: colLongitud,
-            foto: colFoto
-          });
-          console.log('🔍 [EXCEL] ============================================\n');
+          // console.log('\n🔍 [EXCEL] ===== RESUMEN DE MAPEO DE COLUMNAS =====');
+          // console.log('🔍 [EXCEL] Índices encontrados:', {
+          //   estado: colEstado,
+          //   marca: colMarca,
+          //   tipo: colTipo,
+          //   proveedor: colProveedor,
+          //   ciudad: colCiudad,
+          //   direccion: colDireccion,
+          //   fechaInicio: colFechaInicio,
+          //   fechaFin: colFechaFin,
+          //   latitud: colLatitud,
+          //   longitud: colLongitud,
+          //   foto: colFoto
+          // });
+          // console.log('🔍 [EXCEL] ============================================\n');
           
           // Validar que encontró las columnas críticas
           const missingCritical = [];
@@ -556,6 +627,72 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
             return ciudadMap[clean] || clean || null;
           };
 
+          const normalizeCoordinate = (raw, kind) => {
+            if (raw === null || raw === undefined) return null;
+            let input = String(raw).trim();
+            if (!input) return null;
+
+            input = input.replace(',', '.');
+
+            const firstValidIdx = input.search(/-?\d/);
+            if (firstValidIdx > 0) {
+              input = input.slice(firstValidIdx);
+            }
+
+            let sign = '';
+            if (input.startsWith('-')) {
+              sign = '-';
+              input = input.slice(1);
+            }
+
+            let cleaned = input.replace(/[^0-9.]/g, '');
+            const firstDot = cleaned.indexOf('.');
+            if (firstDot !== -1) {
+              cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+            }
+
+            if (!cleaned) return null;
+            if (cleaned.startsWith('.')) cleaned = '0' + cleaned;
+
+            const toNumber = (value) => {
+              const num = parseFloat(value);
+              return Number.isFinite(num) ? num : null;
+            };
+
+            const inRange = (value) => {
+              if (value === null) return false;
+              if (kind === 'lat') return value >= -5 && value <= 15;
+              if (kind === 'lng') return value >= -82 && value <= -66;
+              return true;
+            };
+
+            const baseValue = toNumber(sign + cleaned);
+            const candidates = [];
+            if (baseValue !== null) candidates.push(baseValue);
+
+            const insertDecimalAfter = (digitsCount) => {
+              const digitsOnly = cleaned.replace(/\./g, '');
+              if (digitsOnly.length <= digitsCount) return null;
+              const withDot = digitsOnly.slice(0, digitsCount) + '.' + digitsOnly.slice(digitsCount);
+              return toNumber(sign + withDot);
+            };
+
+            if (cleaned.indexOf('.') === -1 || cleaned.split('.')[0].length > 2) {
+              const candidate = insertDecimalAfter(2);
+              if (candidate !== null) candidates.push(candidate);
+            }
+
+            if (kind === 'lat' && (cleaned.indexOf('.') === -1 || cleaned.split('.')[0].length > 1)) {
+              const candidate = insertDecimalAfter(1);
+              if (candidate !== null) candidates.push(candidate);
+            }
+
+            const rangedCandidate = candidates.find(inRange);
+            if (rangedCandidate !== undefined) return rangedCandidate;
+
+            return baseValue;
+          };
+
           // Procesar registros
           const processedRecords = dataRows
             .filter(row => row.length > 0 && row.some(cell => cell != null && cell !== ''))
@@ -585,10 +722,10 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
                   const { marca, campana } = parseMarcaCampana(val);
                   record.marca = normalizeMarca(marca);
                   record.campana = campana;
-                  console.log(`🏷️ [EXCEL] Columna marca parseada en fila ${idx}:`);
-                  console.log(`   Original: "${val}"`);
-                  console.log(`   → Marca: "${record.marca}"`);
-                  console.log(`   → Campaña: "${record.campana}"`);
+                  // console.log(`🏷️ [EXCEL] Columna marca parseada en fila ${idx}:`);
+                  // console.log(`   Original: "${val}"`);
+                  // console.log(`   → Marca: "${record.marca}"`);
+                  // console.log(`   → Campaña: "${record.campana}"`);
                 }
               }
 
@@ -600,13 +737,24 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
               }
 
               if (colTipo >= 0 && row[colTipo]) {
-                const val = String(row[colTipo]).trim();
+                const val = String(row[colTipo]).trim().toUpperCase();
                 if (val && val !== 'N/A' && !val.startsWith('#')) {
-                  record.tipo_ooh = val;
-                  console.log(`📺 [EXCEL] Tipo OOH extraído de fila ${idx}: "${val}"`);
+                  // Mapear valores del Excel a tipos OOH válidos
+                  const tipoMap = {
+                    'ARRIENDO': 'VALLA',
+                    'PRODUCCION': 'VALLA',  // PRODUCCION también es VALLA
+                    'PRODUCCIÓN': 'VALLA',
+                    'VALLA': 'VALLA',
+                    'POSTER': 'POSTER',
+                    'PISO': 'PISO',
+                    'FASCIA': 'FASCIA',
+                    'DIGITAL': 'DIGITAL'
+                  };
+                  record.tipo_ooh = tipoMap[val] || 'VALLA'; // Default a VALLA si no reconoce
+                  // console.log(`📺 [EXCEL] Tipo OOH extraído de fila ${idx}: "${val}" → "${record.tipo_ooh}"`);
                 }
               } else {
-                console.log(`⚠️ [EXCEL] Fila ${idx}: Tipo OOH NO encontrado o vacío (colTipo=${colTipo}, valor=${row ? row[colTipo] : 'row is null'}), usando default VALLA`);
+                // console.log(`⚠️ [EXCEL] Fila ${idx}: Tipo OOH NO encontrado o vacío (colTipo=${colTipo}, valor=${row ? row[colTipo] : 'row is null'}), usando default VALLA`);
               }
 
               if (colDireccion >= 0 && row[colDireccion]) {
@@ -621,9 +769,9 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
                 const convertedDate = excelSerialToDate(rawValue);
                 if (convertedDate) {
                   record.fecha_inicio = convertedDate;
-                  console.log(`📅 [EXCEL] Fecha inicio convertida en fila ${idx}: ${rawValue} → ${convertedDate}`);
+                  // console.log(`📅 [EXCEL] Fecha inicio convertida en fila ${idx}: ${rawValue} → ${convertedDate}`);
                 } else {
-                  console.log(`⚠️ [EXCEL] Fecha inicio no se pudo parsear en fila ${idx}: ${rawValue}`);
+                  // console.log(`⚠️ [EXCEL] Fecha inicio no se pudo parsear en fila ${idx}: ${rawValue}`);
                 }
               }
 
@@ -632,10 +780,10 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
                 const convertedDate = excelSerialToDate(rawValue);
                 if (convertedDate) {
                   record.fecha_final = convertedDate;
-                  console.log(`📅 [EXCEL] Fecha fin convertida en fila ${idx}: ${rawValue} → ${convertedDate}`);
+                  // console.log(`📅 [EXCEL] Fecha fin convertida en fila ${idx}: ${rawValue} → ${convertedDate}`);
                 } else {
                   // Si no se puede convertir, dejar como null (es opcional)
-                  console.log(`⏭️ [EXCEL] Fecha fin no se pudo parsear o está vacía en fila ${idx}: ${rawValue}`);
+                  // console.log(`⏭️ [EXCEL] Fecha fin no se pudo parsear o está vacía en fila ${idx}: ${rawValue}`);
                   record.fecha_final = null;
                 }
               } else {
@@ -644,45 +792,45 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
               }
 
               if (colLatitud >= 0 && row[colLatitud]) {
-                const val = parseFloat(String(row[colLatitud]));
-                if (!isNaN(val)) {
+                const val = normalizeCoordinate(row[colLatitud], 'lat');
+                if (val !== null) {
                   record.latitud = val;
-                  console.log(`📍 [EXCEL] Latitud extraída de fila ${idx}: ${val}`);
+                  // console.log(`📍 [EXCEL] Latitud extraída de fila ${idx}: ${val}`);
                 }
               } else {
-                console.log(`⚠️ [EXCEL] Fila ${idx}: Latitud NO encontrada (colLatitud=${colLatitud})`);
+                // console.log(`⚠️ [EXCEL] Fila ${idx}: Latitud NO encontrada (colLatitud=${colLatitud})`);
               }
 
               if (colLongitud >= 0 && row[colLongitud]) {
-                const val = parseFloat(String(row[colLongitud]));
-                if (!isNaN(val)) {
+                const val = normalizeCoordinate(row[colLongitud], 'lng');
+                if (val !== null) {
                   record.longitud = val;
-                  console.log(`📍 [EXCEL] Longitud extraída de fila ${idx}: ${val}`);
+                  // console.log(`📍 [EXCEL] Longitud extraída de fila ${idx}: ${val}`);
                 }
               } else {
-                console.log(`⚠️ [EXCEL] Fila ${idx}: Longitud NO encontrada (colLongitud=${colLongitud})`);
+                // console.log(`⚠️ [EXCEL] Fila ${idx}: Longitud NO encontrada (colLongitud=${colLongitud})`);
               }
 
               if (colProveedor >= 0 && row[colProveedor]) {
                 const val = String(row[colProveedor]).trim();
                 if (val && val !== 'N/A' && !val.startsWith('#')) {
                   record.proveedor = val;
-                  console.log(`🏢 [EXCEL] Proveedor extraído de fila ${idx}: ${val}`);
+                  // console.log(`🏢 [EXCEL] Proveedor extraído de fila ${idx}: ${val}`);
                 }
               } else {
-                console.log(`⚠️ [EXCEL] Fila ${idx}: Proveedor NO encontrado (colProveedor=${colProveedor})`);
+                // console.log(`⚠️ [EXCEL] Fila ${idx}: Proveedor NO encontrado (colProveedor=${colProveedor})`);
               }
 
               if (colEstado >= 0 && row[colEstado]) {
                 const val = String(row[colEstado]).trim();
                 if (val && val !== 'N/A' && !val.startsWith('#')) {
                   record.estado = val.toUpperCase();
-                  console.log(`📊 [EXCEL] Estado extraído de fila ${idx}: "${record.estado}"`);
+                  // console.log(`📊 [EXCEL] Estado extraído de fila ${idx}: "${record.estado}"`);
                 }
               } else {
                 // Estado por defecto
                 record.estado = 'ACTIVO';
-                console.log(`⏭️ [EXCEL] Fila ${idx}: Estado NO encontrado, usando default ACTIVO`);
+                // console.log(`⏭️ [EXCEL] Fila ${idx}: Estado NO encontrado, usando default ACTIVO`);
               }
 
               // Generar campaña si no existe
@@ -709,14 +857,14 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
             .filter(r => {
               const valid = r.marca && r.ciudad;
               if (!valid && (r.marca || r.ciudad)) {
-                console.log('⚠️ [EXCEL] Fila incompleta:', r);
+                // console.log('⚠️ [EXCEL] Fila incompleta:', r);
               }
               return valid;
             }); // Filtrar registros sin marca o ciudad
 
-          console.log('✅ [EXCEL] Registros válidos encontrados:', processedRecords.length);
+          // console.log('✅ [EXCEL] Registros válidos encontrados:', processedRecords.length);
           if (processedRecords.length > 0) {
-            console.log('📄 [EXCEL] Primeros 3 registros:', processedRecords.slice(0, 3));
+            // console.log('📄 [EXCEL] Primeros 3 registros:', processedRecords.slice(0, 3));
           }
 
           if (processedRecords.length === 0) {
@@ -843,7 +991,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
       const providers = Array.isArray(providersRes.data) ? providersRes.data : (providersRes.data.data || []);
       const states = Array.isArray(statesRes.data) ? statesRes.data : (statesRes.data.data || []);
 
-      console.log('📚 [EXCEL] Catálogos obtenidos:', { brands, cities, types, providers, states });
+      // console.log('📚 [EXCEL] Catálogos obtenidos:', { brands, cities, types, providers, states });
 
       // Función auxiliar para encontrar o crear entidades
       const findOrCreateBrand = async (name) => {
@@ -852,15 +1000,31 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         let found = brands.find(b => b.nombre?.toUpperCase() === nameUpper);
         if (!found) {
           // Crear marca nueva
-          console.log('   ⚡ Marca no encontrada, creando nueva:', nameUpper);
+          // console.log('   ⚡ Marca no encontrada, creando nueva:', nameUpper);
           const res = await axios.post('http://localhost:8080/api/ooh/brands', { nombre: nameUpper });
           found = res.data;
           brands.push(found); // Agregar al cache
-          console.log('✨ [EXCEL] Marca creada:', found);
+          // console.log('✨ [EXCEL] Marca creada:', found);
         } else {
-          console.log('♻️ [EXCEL] Marca existente reutilizada:', nameUpper, '(ID:', found.id + ')');
+          // console.log('♻️ [EXCEL] Marca existente reutilizada:', nameUpper, '(ID:', found.id + ')');
         }
         return found.id;
+      };
+
+      // Mapeo de ciudades a regiones (basado en BD reset script)
+      const CIUDAD_REGION_MAP = {
+        'ARMENIA': 'CO Andes', 'BOGOTA': 'CO Centro', 'BARRANQUILLA': 'CO Norte',
+        'BELLO': 'CO Andes', 'BUCARAMANGA': 'CO Norte', 'CALI': 'CO Sur',
+        'CARTAGENA': 'CO Norte', 'CORDOBA': 'CO Norte', 'CUCUTA': 'CO Norte',
+        'DUITAMA': 'CO Centro', 'IBAGUE': 'CO Andes', 'ITAGUI': 'CO Andes',
+        'LA MESA': 'CO Centro', 'MANIZALES': 'CO Andes', 'MEDELLIN': 'CO Andes',
+        'MONTERÍA': 'CO Norte', 'MOSQUERA': 'CO Centro', 'NEIVA': 'CO Sur',
+        'PEREIRA': 'CO Andes', 'POPAYAN': 'CO Sur', 'ROVIRA': 'CO Andes',
+        'SANTA MARTA': 'CO Norte', 'SESQUILE': 'CO Centro', 'SINCELEJO': 'CO Norte',
+        'SOACHA': 'CO Centro', 'SOGAMOSO': 'CO Centro', 'TULUA': 'CO Sur',
+        'TUNJA': 'CO Centro', 'VALLEDUPAR': 'CO Norte', 'VILLAVICENCIO': 'CO Centro',
+        'VITERBO': 'CO Andes', 'ZIPAQUIRA': 'CO Centro', 'CHIA': 'CO Centro',
+        'MONDOÑEDO': 'CO Andes'  // Inferido como cercana a Manizales
       };
 
       const findOrCreateCity = async (name) => {
@@ -873,26 +1037,36 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         if (similarMatch) {
           const { city, similarity, exactMatch } = similarMatch;
           if (exactMatch) {
-            console.log('♻️ [EXCEL] Ciudad existente (coincidencia exacta):', city.nombre, '(ID:', city.id + ')');
+            // console.log('♻️ [EXCEL] Ciudad existente (coincidencia exacta):', city.nombre, '(ID:', city.id + ')');
           } else {
-            console.log(`🔍 [EXCEL] Ciudad similar encontrada (${similarity.toFixed(1)}% similitud):`);
-            console.log(`   Buscado: "${nameUpper}"`);
-            console.log(`   Encontrado: "${city.nombre}" (ID: ${city.id})`);
-            console.log('   ✅ Reutilizando ciudad existente para evitar duplicados');
+            // console.log(`🔍 [EXCEL] Ciudad similar encontrada (${similarity.toFixed(1)}% similitud):`);
+            // console.log(`   Buscado: "${nameUpper}"`);
+            // console.log(`   Encontrado: "${city.nombre}" (ID: ${city.id})`);
+            // console.log('   ✅ Reutilizando ciudad existente para evitar duplicados');
           }
           return city.id;
         }
         
         // No se encontró ciudad similar, crear nueva
-        console.log('   ⚡ Ciudad no encontrada (ni similar), creando nueva (INCOMPLETA - falta centro y radio):', nameUpper);
+        // console.log('   ⚡ Ciudad no encontrada (ni similar), creando nueva (INCOMPLETA - falta centro y radio):', nameUpper);
+        
+        // Buscar región para la ciudad
+        const regionName = CIUDAD_REGION_MAP[nameUpper] || 'CO Centro'; // Default a Centro
+        const region = regions.find(r => r.nombre === regionName);
+        const region_id = region?.id || 1; // Default a región 1 si no encuentra
+        
+        // console.log(`   📍 Región asignada: "${regionName}" (ID: ${region_id})`);
+        
         const res = await axios.post('http://localhost:8080/api/ooh/cities', { 
           nombre: nameUpper,
-          latitud: null,   // ⚠️ PENDIENTE: Agregar centro de ciudad
-          longitud: null   // ⚠️ PENDIENTE: Agregar centro de ciudad
+          region_id: region_id,  // ✅ AHORA ENVIANDO REGION_ID
+          latitud: 0,   // ⚠️ PENDIENTE: Agregar centro real de la ciudad
+          longitud: 0,  // ⚠️ PENDIENTE: Agregar centro real de la ciudad
+          radio_km: 15  // Radio por defecto de 15 km
         });
-        const newCity = res.data;
+        const newCity = res.data.data || res.data;  // Manejar respuesta envuelta o directa
         cities.push(newCity); // Agregar al cache
-        console.log('⚠️ [EXCEL] Ciudad creada INCOMPLETA:', newCity, '- Requiere agregar latitud, longitud y radio');
+        // console.log('⚠️ [EXCEL] Ciudad creada INCOMPLETA:', newCity, '- Requiere agregar latitud, longitud y radio correctos');
         return newCity.id;
       };
 
@@ -902,13 +1076,13 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         let found = providers.find(p => p.nombre?.toUpperCase() === nameUpper);
         if (!found) {
           // Crear proveedor nuevo
-          console.log('   ⚡ Proveedor no encontrado, creando nuevo:', nameUpper);
+          // console.log('   ⚡ Proveedor no encontrado, creando nuevo:', nameUpper);
           const res = await axios.post('http://localhost:8080/api/ooh/providers', { nombre: nameUpper });
           found = res.data;
           providers.push(found); // Agregar al cache
-          console.log('✨ [EXCEL] Proveedor creado:', found);
+          // console.log('✨ [EXCEL] Proveedor creado:', found);
         } else {
-          console.log('♻️ [EXCEL] Proveedor existente reutilizado:', nameUpper, '(ID:', found.id + ')');
+          // console.log('♻️ [EXCEL] Proveedor existente reutilizado:', nameUpper, '(ID:', found.id + ')');
         }
         return found.id;
       };
@@ -919,52 +1093,52 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         let found = states.find(s => s.nombre?.toUpperCase() === nameUpper);
         if (!found) {
           // Crear estado nuevo
-          console.log('   ⚡ Estado no encontrado, creando nuevo:', nameUpper);
+          // console.log('   ⚡ Estado no encontrado, creando nuevo:', nameUpper);
           try {
             const res = await axios.post('http://localhost:8080/api/ooh/states', { nombre: nameUpper });
-            found = res.data;
+            found = res.data.data || res.data;  // Backend retorna { success, data: { id, nombre, descripcion } }
             states.push(found); // Agregar al cache
-            console.log('✨ [EXCEL] Estado creado:', found);
+            // console.log('✨ [EXCEL] Estado creado:', found);
           } catch (err) {
-            console.warn('⚠️ Error creando estado, usando ACTIVO por defecto:', err.message);
+            // console.warn('⚠️ Error creando estado, usando ACTIVO por defecto:', err.message);
             // Usar ACTIVO por defecto si falla
             found = states.find(s => s.nombre === 'ACTIVO') || { id: 1, nombre: 'ACTIVO' };
           }
         } else {
-          console.log('♻️ [EXCEL] Estado existente reutilizado:', nameUpper, '(ID:', found.id + ')');
+          // console.log('♻️ [EXCEL] Estado existente reutilizado:', nameUpper, '(ID:', found.id + ')');
         }
         return found.id;
       };
 
       const findOrCreateOOHType = async (name) => {
-        console.log('🔍 [EXCEL] findOrCreateOOHType() llamado con name:', name, 'tipo:', typeof name);
+        // console.log('🔍 [EXCEL] findOrCreateOOHType() llamado con name:', name, 'tipo:', typeof name);
         
         if (!name || name === '' || name === 'undefined') {
           // Default: VALLA
           const vallaId = types.find(t => t.nombre?.toUpperCase() === 'VALLA')?.id;
-          console.log('📺 [EXCEL] Tipo OOH no especificado o vacío, usando default VALLA (ID: ' + vallaId + ')');
-          console.log('   Tipos disponibles:', types.map(t => ({ id: t.id, nombre: t.nombre })));
+          // console.log('📺 [EXCEL] Tipo OOH no especificado o vacío, usando default VALLA (ID: ' + vallaId + ')');
+          // console.log('   Tipos disponibles:', types.map(t => ({ id: t.id, nombre: t.nombre })));
           return vallaId || 1;
         }
         const nameUpper = String(name).toUpperCase().trim();
-        console.log('📺 [EXCEL] Buscando tipo normalizado: "' + nameUpper + '"');
-        console.log('   Tipos disponibles:', types.map(t => ({ id: t.id, nombre: t.nombre })));
+        // console.log('📺 [EXCEL] Buscando tipo normalizado: "' + nameUpper + '"');
+        // console.log('   Tipos disponibles:', types.map(t => ({ id: t.id, nombre: t.nombre })));
         
         let found = types.find(t => t.nombre?.toUpperCase() === nameUpper);
         if (!found) {
           // Crear tipo nuevo
-          console.log('   ⚡ Tipo no encontrado, creando nuevo...');
+          // console.log('   ⚡ Tipo no encontrado, creando nuevo...');
           const res = await axios.post('http://localhost:8080/api/ooh/types', { nombre: nameUpper });
           found = res.data?.data || res.data; // Manejar respuesta envuelta
           types.push(found);
-          console.log('✨ [EXCEL] Tipo OOH creado:', found);
+          // console.log('✨ [EXCEL] Tipo OOH creado:', found);
         }
         const typeId = found?.id;
         if (!typeId) {
           console.error('❌ [EXCEL] ERROR: found.id es undefined!', found);
           throw new Error('No se pudo obtener ID del tipo OOH: ' + nameUpper);
         }
-        console.log('✅ [EXCEL] Tipo OOH retornando ID: ' + typeId + ' para nombre: ' + nameUpper);
+        // console.log('✅ [EXCEL] Tipo OOH retornando ID: ' + typeId + ' para nombre: ' + nameUpper);
         return typeId;
       };
 
@@ -977,15 +1151,15 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         let found = campaigns.find(c => c.nombre?.toUpperCase() === nameUpper && c.brand_id === brandId);
         if (!found) {
           // Crear campaña nueva
-          console.log('   ⚡ Campaña no encontrada, creando nueva:', nameUpper, 'para brand_id:', brandId);
+          // console.log('   ⚡ Campaña no encontrada, creando nueva:', nameUpper, 'para brand_id:', brandId);
           const res = await axios.post('http://localhost:8080/api/ooh/campaigns', { 
             nombre: nameUpper,
             brandId: brandId  // Cambiar brand_id a brandId
           });
           found = res.data.data || res.data;  // Manejar respuesta envuelta
-          console.log('✨ [EXCEL] Campaña creada:', found);
+          // console.log('✨ [EXCEL] Campaña creada:', found);
         } else {
-          console.log('♻️ [EXCEL] Campaña existente reutilizada:', nameUpper, '(ID:', found.id + ')');
+          // console.log('♻️ [EXCEL] Campaña existente reutilizada:', nameUpper, '(ID:', found.id + ')');
         }
         return found.id;
       };
@@ -995,13 +1169,24 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         const record = records[i];
         const rowNumber = i + 1;
         
-        console.log(`📝 [EXCEL] Procesando registro ${rowNumber}/${records.length}:`, record);
+        // console.log(`📝 [EXCEL] Procesando registro ${rowNumber}/${records.length}:`, record);
 
         // 1. Validar datos críticos ANTES de intentar crear
         const validation = validateRecord(record, rowNumber);
         if (!validation.valid) {
           const reason = `Faltan datos críticos: ${validation.missing.join(', ')}`;
-          console.log(`⚠️ [EXCEL] Registro ${rowNumber} omitido: ${reason}`);
+          // console.log(`⚠️ [EXCEL] Registro ${rowNumber} omitido: ${reason}`);
+          // console.log(`   📋 Datos del registro:`, {
+          //   marca: record.marca,
+          //   ciudad: record.ciudad,
+          //   direccion: record.direccion,
+          //   latitud: record.latitud,
+          //   longitud: record.longitud,
+          //   tipo_ooh: record.tipo_ooh,
+          //   proveedor: record.proveedor,
+          //   estado: record.estado,
+          //   campana: record.campana
+          // });
           failed.push({ rowNumber, record, reason });
           setCreatedCount(i + 1);
           continue; // Saltar este registro
@@ -1009,19 +1194,40 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
 
         try {
           // Obtener o crear IDs
-          console.log(`🔄 [EXCEL] Obteniendo IDs para registro ${rowNumber}...`);
+          // console.log(`🔄 [EXCEL] Obteniendo IDs para registro ${rowNumber}...`);
           const brand_id = await findOrCreateBrand(record.marca);
-          console.log(`   ✓ brand_id: ${brand_id}`);
+          // console.log(`   ✓ brand_id: ${brand_id}`);
           const city_id = await findOrCreateCity(record.ciudad);
-          console.log(`   ✓ city_id: ${city_id}`);
+          // console.log(`   ✓ city_id: ${city_id}`);
+          const cityInfo = cities.find(c => c.id === city_id) || cities.find(c => String(c.nombre || '').toUpperCase() === String(record.ciudad || '').toUpperCase());
+          
+          // Rastrear si requiere revisión
+          let reviewReason = null;
+          const fallbackReason = applyFallbackCoordinates(record, cityInfo);
+          if (fallbackReason) {
+            reviewReason = fallbackReason;
+            // console.log(`🧭 [EXCEL] ${reviewReason}`);
+          }
+          
+          // Verificar si las coordenadas están fuera de rango
+          if (!reviewReason) {
+            const outOfRangeReason = checkCoordinateOutOfRange(record, cityInfo);
+            if (outOfRangeReason) {
+              reviewReason = outOfRangeReason;
+              // console.log(`⚠️ [EXCEL] ${reviewReason}`);
+            }
+          }
+          
+          record.review_reason = reviewReason;
+          
           const provider_id = await findOrCreateProvider(record.proveedor);
-          console.log(`   ✓ provider_id: ${provider_id}`);
+          // console.log(`   ✓ provider_id: ${provider_id}`);
           const ooh_type_id = await findOrCreateOOHType(record.tipo_ooh);
-          console.log(`   ✓ ooh_type_id: ${ooh_type_id} (de tipo_ooh: "${record.tipo_ooh}")`);
+          // console.log(`   ✓ ooh_type_id: ${ooh_type_id} (de tipo_ooh: "${record.tipo_ooh}")`);
           const campaign_id = await findOrCreateCampaign(record.campana, brand_id);
-          console.log(`   ✓ campaign_id: ${campaign_id}`);
+          // console.log(`   ✓ campaign_id: ${campaign_id}`);
           const state_id = await findOrCreateState(record.estado);
-          console.log(`   ✓ state_id: ${state_id} (de estado: "${record.estado}")`);
+          // console.log(`   ✓ state_id: ${state_id} (de estado: "${record.estado}")`);
 
           // 🔒 PROTECCIÓN DUPLICADOS: Evitar duplicados dentro del mismo Excel
           const batchKey = [
@@ -1034,7 +1240,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
           ].join('|');
 
           if (seenInBatch.has(batchKey)) {
-            console.log(`⏭️ [DUPLICADO] Registro ${rowNumber} repetido en el mismo Excel`);
+            // console.log(`⏭️ [DUPLICADO] Registro ${rowNumber} repetido en el mismo Excel`);
             failed.push({ rowNumber, record, reason: 'Duplicado en este archivo (mismo punto)' });
             setCreatedCount(i + 1);
             continue;
@@ -1053,7 +1259,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
 
           // Si hay duplicados, acumularlos para decidir en lote
           if (similarRecords.length > 0) {
-            console.log(`🔍 [DUPLICADO] Encontrados ${similarRecords.length} registro(s) similar(es)`);
+            // console.log(`🔍 [DUPLICADO] Encontrados ${similarRecords.length} registro(s) similar(es)`);
             duplicatesFound.push({
               key: `${rowNumber}`,
               rowNumber,
@@ -1082,7 +1288,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
               longitud: record.longitud
             });
             addressData = addressRes.data?.data || addressRes.data;
-            console.log('📍 [EXCEL] Dirección lista:', addressData);
+            // console.log('📍 [EXCEL] Dirección lista:', addressData);
           } catch (addressErr) {
             // Capturar error específico de validación geográfica
             const addressError = addressErr.response?.data?.error || addressErr.message;
@@ -1106,26 +1312,30 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
           formData.append('longitud', record.longitud || '');
           formData.append('anunciante', 'ABI');  // Todos los registros de Excel son de ABI
           formData.append('fechaInicio', record.fecha_inicio || '');  // Backend espera fechaInicio
-          formData.append('fechaFinal', record.fecha_final || '');     // Backend espera fechaFinal
+          formData.append('fechaFin', record.fecha_final || '');     // Backend espera fechaFin (sin 'a')
           formData.append('fromExcel', 'true');  // Marcar como importación de Excel (permite sin imágenes)
           if (record.estado) formData.append('estado', record.estado);
+          if (record.review_reason) {
+            formData.append('review_required', '1');
+            formData.append('review_reason', record.review_reason);
+          }
           if (existingId) formData.append('existingId', existingId);
           return formData;
         };
 
-        console.log('🚀 [EXCEL] Enviando registro con IDs:', {
-          rowNumber,
-          brand_id,
-          campaign_id,
-          ooh_type_id,
-          city_id,
-          provider_id,
-          state_id,          // 📌 NUEVO
-          direccion: record.direccion,
-          latitud: record.latitud,
-          longitud: record.longitud,
-          anunciante: 'ABI'
-        });
+        // console.log('🚀 [EXCEL] Enviando registro con IDs:', {
+        //   rowNumber,
+        //   brand_id,
+        //   campaign_id,
+        //   ooh_type_id,
+        //   city_id,
+        //   provider_id,
+        //   state_id,          // 📌 NUEVO
+        //   direccion: record.direccion,
+        //   latitud: record.latitud,
+        //   longitud: record.longitud,
+        //   anunciante: 'ABI'
+        // });
 
         // Validar que ooh_type_id NO sea undefined
         if (!ooh_type_id || ooh_type_id === 'undefined') {
@@ -1140,7 +1350,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
           });
 
           successCount++;
-          console.log(`✅ [EXCEL] Registro ${rowNumber} creado exitosamente`);
+          // console.log(`✅ [EXCEL] Registro ${rowNumber} creado exitosamente`);
         } catch (createErr) {
           // Capturar error específico de creación del registro
           const createError = createErr.response?.data?.error || createErr.message || 'Error desconocido al crear registro';
@@ -1163,10 +1373,10 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
           
           // Si es error de coordenadas, mostrar alerta inmediata
           if (fullReason.includes('Coordenadas fuera del rango') || fullReason.includes('coordenadas')) {
-            console.warn(`⚠️⚠️⚠️ ERROR GEOGRÁFICO en fila ${rowNumber}:`);
-            console.warn(`   ${fullReason}`);
-            console.warn(`   Marca: ${record.marca}, Ciudad: ${record.ciudad}`);
-            console.warn(`   Lat: ${record.latitud}, Lng: ${record.longitud}`);
+            // console.warn(`⚠️⚠️⚠️ ERROR GEOGRÁFICO en fila ${rowNumber}:`);
+            // console.warn(`   ${fullReason}`);
+            // console.warn(`   Marca: ${record.marca}, Ciudad: ${record.ciudad}`);
+            // console.warn(`   Lat: ${record.latitud}, Lng: ${record.longitud}`);
           }
           
           failed.push({ rowNumber, record, reason: fullReason });
@@ -1197,7 +1407,7 @@ const ExcelUploader = ({ onDataLoaded, onClose }) => {
         const geoErrors = failed.filter(f => f.reason.includes('Coordenadas fuera del rango') || f.reason.includes('coordenadas')).length;
         
         setImportSummary({
-          success: successCount - failed.length,
+          success: successCount,
           failed: failed.length,
           geoErrors
         });

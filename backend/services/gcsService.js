@@ -21,10 +21,10 @@ if (process.env.GCP_PROJECT_ID && process.env.GCP_KEY_FILE) {
   // Las imágenes se organizan en la carpeta Historico/ dentro del bucket
   if (process.env.GCP_HISTORICO_BUCKET) {
     historicoBucket = storage.bucket(process.env.GCP_HISTORICO_BUCKET);
-    console.log(`🪣 Usando bucket: ${process.env.GCP_HISTORICO_BUCKET}/Historico/`);
+    // console.log(`🪣 Usando bucket: ${process.env.GCP_HISTORICO_BUCKET}/Historico/`);
   }
 } else {
-  console.log('⚠️ GCS no configurado: Falta GCP_PROJECT_ID o GCP_KEY_FILE');
+  // console.log('⚠️ GCS no configurado: Falta GCP_PROJECT_ID o GCP_KEY_FILE');
 }
 
 /**
@@ -127,7 +127,7 @@ const deleteFromGCS = async (imageUrl) => {
     const bucket = storage.bucket(bucketName);
     const file = bucket.file(filepath);
     await file.delete();
-    console.log(`✅ Archivo eliminado: ${filepath}`);
+    // console.log(`✅ Archivo eliminado: ${filepath}`);
   } catch (error) {
     console.error('❌ Error al eliminar de GCS:', error);
     // No lanzar error, solo registrar
@@ -148,14 +148,14 @@ const deleteRecordFolder = async (brand, recordId) => {
     const [files] = await historicoBucket.getFiles({ prefix });
     
     if (files.length === 0) {
-      console.log(`⚠️ No se encontraron archivos en: ${prefix}`);
+      // console.log(`⚠️ No se encontraron archivos en: ${prefix}`);
       return;
     }
 
     const deletePromises = files.map(file => file.delete());
     await Promise.all(deletePromises);
     
-    console.log(`✅ ${files.length} archivos eliminados de ${prefix}`);
+    // console.log(`✅ ${files.length} archivos eliminados de ${prefix}`);
   } catch (error) {
     console.error('❌ Error al eliminar carpeta de GCS:', error);
   }

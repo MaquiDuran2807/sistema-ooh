@@ -967,6 +967,7 @@ const OOHForm = ({ onSuccess }) => {
 
       {showExcelUploader && (
         <ExcelUploader
+          regions={contextRegions}
           onDataLoaded={() => {
             setShowExcelUploader(false);
             if (onSuccess) onSuccess();

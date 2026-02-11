@@ -20,13 +20,13 @@ export const getBrandByName = async (nombre, brands = []) => {
         (b.nombre || '').toLowerCase() === (nombre || '').toLowerCase()
       );
       if (brand) {
-        console.log(`✅ Marca encontrada en AppContext: ${nombre}`);
+        // console.log(`✅ Marca encontrada en AppContext: ${nombre}`);
         return brand;
       }
     }
     
     // ❌ FALLBACK: Si no existe en AppContext, hacer llamada API
-    console.warn(`⚠️  Marca "${nombre}" no en AppContext, consultando API...`);
+    // console.warn(`⚠️  Marca "${nombre}" no en AppContext, consultando API...`);
     const response = await api.get('/api/brands/by-name', {
       params: { nombre }
     });
@@ -51,13 +51,13 @@ export const getCityByName = async (nombre, cities = []) => {
         (c.nombre || '').toLowerCase() === (nombre || '').toLowerCase()
       );
       if (city) {
-        console.log(`✅ Ciudad encontrada en AppContext: ${nombre}`);
+        // console.log(`✅ Ciudad encontrada en AppContext: ${nombre}`);
         return city;
       }
     }
     
     // ❌ FALLBACK: Si no existe en AppContext, hacer llamada API
-    console.warn(`⚠️  Ciudad "${nombre}" no en AppContext, consultando API...`);
+    // console.warn(`⚠️  Ciudad "${nombre}" no en AppContext, consultando API...`);
     const response = await api.get('/api/cities/by-name', {
       params: { nombre }
     });
@@ -82,13 +82,13 @@ export const getOOHTypeByName = async (nombre, oohTypes = []) => {
         (t.nombre || '').toLowerCase() === (nombre || '').toLowerCase()
       );
       if (oohType) {
-        console.log(`✅ Tipo OOH encontrado en AppContext: ${nombre}`);
+        // console.log(`✅ Tipo OOH encontrado en AppContext: ${nombre}`);
         return oohType;
       }
     }
     
     // ❌ FALLBACK: Si no existe en AppContext, hacer llamada API
-    console.warn(`⚠️  Tipo OOH "${nombre}" no en AppContext, consultando API...`);
+    // console.warn(`⚠️  Tipo OOH "${nombre}" no en AppContext, consultando API...`);
     const response = await api.get('/api/ooh-types/by-name', {
       params: { nombre }
     });
@@ -113,13 +113,13 @@ export const getProviderByName = async (nombre, providers = []) => {
         (p.nombre || p || '').toLowerCase() === (nombre || '').toLowerCase()
       );
       if (provider) {
-        console.log(`✅ Proveedor encontrado en AppContext: ${nombre}`);
+        // console.log(`✅ Proveedor encontrado en AppContext: ${nombre}`);
         return provider;
       }
     }
     
     // ❌ FALLBACK: Si no existe en AppContext, hacer llamada API
-    console.warn(`⚠️  Proveedor "${nombre}" no en AppContext, consultando API...`);
+    // console.warn(`⚠️  Proveedor "${nombre}" no en AppContext, consultando API...`);
     const response = await api.get('/api/providers/by-name', {
       params: { nombre }
     });
@@ -144,13 +144,13 @@ export const getCampaignByName = async (nombre, campaigns = []) => {
         (c.nombre || '').toLowerCase() === (nombre || '').toLowerCase()
       );
       if (campaign) {
-        console.log(`✅ Campaña encontrada en AppContext: ${nombre}`);
+        // console.log(`✅ Campaña encontrada en AppContext: ${nombre}`);
         return campaign;
       }
     }
     
     // ❌ FALLBACK: Si no existe en AppContext, hacer llamada API
-    console.warn(`⚠️  Campaña "${nombre}" no en AppContext, consultando API...`);
+    // console.warn(`⚠️  Campaña "${nombre}" no en AppContext, consultando API...`);
     const response = await api.get('/api/campaigns/by-name', {
       params: { nombre }
     });

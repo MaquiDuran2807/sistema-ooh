@@ -77,7 +77,7 @@ const addToExcel = async (data) => {
     });
 
     await workbook.xlsx.writeFile(EXCEL_FILE);
-    console.log('Registro añadido a Excel exitosamente');
+    // console.log('Registro añadido a Excel exitosamente');
   } catch (error) {
     console.error('Error al agregar fila a Excel:', error);
     throw error;
@@ -86,38 +86,38 @@ const addToExcel = async (data) => {
 
 const getAllFromExcel = async () => {
   try {
-    console.log('📂 Iniciando getAllFromExcel...');
+    // console.log('📂 Iniciando getAllFromExcel...');
     await initializeExcel();
     
     if (!fs.existsSync(EXCEL_FILE)) {
-      console.warn('⚠️ Archivo Excel no existe en:', EXCEL_FILE);
+      // console.warn('⚠️ Archivo Excel no existe en:', EXCEL_FILE);
       return [];
     }
 
-    console.log('✅ Archivo Excel encontrado:', EXCEL_FILE);
+    // console.log('✅ Archivo Excel encontrado:', EXCEL_FILE);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(EXCEL_FILE);
-    console.log('✅ Workbook cargado');
+    // console.log('✅ Workbook cargado');
     
     const worksheet = workbook.getWorksheet('OOH Data');
 
     if (!worksheet) {
-      console.warn('⚠️ Worksheet "OOH Data" no encontrada');
-      console.log('📋 Worksheets disponibles:', workbook.worksheets.map(ws => ws.name));
+      // console.warn('⚠️ Worksheet "OOH Data" no encontrada');
+      // console.log('📋 Worksheets disponibles:', workbook.worksheets.map(ws => ws.name));
       return [];
     }
 
-    console.log('✅ Worksheet encontrada. Filas totales:', worksheet.rowCount);
+    // console.log('✅ Worksheet encontrada. Filas totales:', worksheet.rowCount);
 
     const data = [];
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) {
-        console.log(`📝 Fila ${rowNumber}:`, row.values);
+        // console.log(`📝 Fila ${rowNumber}:`, row.values);
         data.push(row.values);
       }
     });
 
-    console.log(`📊 Total registros encontrados: ${data.length}`);
+    // console.log(`📊 Total registros encontrados: ${data.length}`);
     return data;
   } catch (error) {
     console.error('❌ Error al leer Excel:', error);
@@ -139,7 +139,7 @@ const findExistingRecord = async (direccion, fechaInicio, marca, campana) => {
     const worksheet = workbook.getWorksheet('OOH Data');
 
     if (!worksheet) {
-      console.warn('Worksheet no encontrada en findExistingRecord');
+      // console.warn('Worksheet no encontrada en findExistingRecord');
       return { row: null, rowNumber: null };
     }
 
@@ -155,7 +155,7 @@ const findExistingRecord = async (direccion, fechaInicio, marca, campana) => {
             foundRowNumber = rowNumber;
           }
         } catch (rowError) {
-          console.warn(`Error procesando fila ${rowNumber}:`, rowError.message);
+          // console.warn(`Error procesando fila ${rowNumber}:`, rowError.message);
         }
       }
     });
@@ -180,11 +180,11 @@ const findExistingRecordById = async (id) => {
     const worksheet = workbook.getWorksheet('OOH Data');
 
     if (!worksheet) {
-      console.warn('Worksheet no encontrada en findExistingRecordById');
+      // console.warn('Worksheet no encontrada en findExistingRecordById');
       return { row: null, rowNumber: null };
     }
 
-    console.log('🔎 Buscando ID en Excel:', id);
+    // console.log('🔎 Buscando ID en Excel:', id);
 
     let foundRow = null;
     let foundRowNumber = null;
@@ -194,21 +194,21 @@ const findExistingRecordById = async (id) => {
         try {
           const rowData = row.values;
           const excelId = rowData && rowData[1] ? String(rowData[1]).trim() : '';
-          console.log(`📋 Fila ${rowNumber}: ID="${excelId}"`);
+          // console.log(`📋 Fila ${rowNumber}: ID="${excelId}"`);
           
           if (excelId === id.trim()) {
-            console.log('✅ ID encontrado en línea', rowNumber);
+            // console.log('✅ ID encontrado en línea', rowNumber);
             foundRow = rowData;
             foundRowNumber = rowNumber;
           }
         } catch (rowError) {
-          console.warn(`Error procesando fila ${rowNumber}:`, rowError.message);
+          // console.warn(`Error procesando fila ${rowNumber}:`, rowError.message);
         }
       }
     });
 
     if (!foundRow) {
-      console.log('❌ ID no encontrado en Excel');
+      // console.log('❌ ID no encontrado en Excel');
     }
 
     return { row: foundRow, rowNumber: foundRowNumber };
@@ -257,7 +257,7 @@ const updateExcelRow = async (rowNumber, data) => {
     };
 
     await workbook.xlsx.writeFile(EXCEL_FILE);
-    console.log(`Registro actualizado en fila ${rowNumber}`);
+    // console.log(`Registro actualizado en fila ${rowNumber}`);
   } catch (error) {
     console.error('Error al actualizar fila en Excel:', error);
     throw error;

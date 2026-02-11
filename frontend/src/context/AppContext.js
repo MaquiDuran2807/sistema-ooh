@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useCallback } from 'react';
+import React, { createContext, useState, useContext, useCallback, useMemo } from 'react';
 import axios from 'axios';
 
 const AppContext = createContext();
@@ -21,7 +21,7 @@ export const AppProvider = ({ children }) => {
   const [records, setRecords] = useState([]);
   const [recordsPagination, setRecordsPagination] = useState({
     page: 1,
-    limit: 20,
+    limit: 30,
     total: 0,
     totalPages: 0,
     hasMore: false
@@ -33,7 +33,7 @@ export const AppProvider = ({ children }) => {
   const initializeApp = useCallback(async () => {
     setLoading(true);
     try {
-      console.log('🚀 Inicializando app... URL:', API_URL);
+      // console.log('🚀 Inicializando app... URL:', API_URL);
       const startTime = performance.now();
       const res = await axios.get(`${API_URL}/api/ooh/initialize`, {
         params: { includeRecords: false }
@@ -47,21 +47,21 @@ export const AppProvider = ({ children }) => {
       const sizeInKB = (sizeInBytes / 1024).toFixed(2);
       const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
       
-      console.log(`⏱️ TIEMPO DE REQUEST: ${requestTime}ms`);
-      console.log(`📊 TAMAÑO DE RESPUESTA (cliente):`);
-      console.log(`   Bytes: ${sizeInBytes}`);
-      console.log(`   KB: ${sizeInKB}`);
-      console.log(`   MB: ${sizeInMB}`);
+      // console.log(`⏱️ TIEMPO DE REQUEST: ${requestTime}ms`);
+      // console.log(`📊 TAMAÑO DE RESPUESTA (cliente):`);
+      // console.log(`   Bytes: ${sizeInBytes}`);
+      // console.log(`   KB: ${sizeInKB}`);
+      // console.log(`   MB: ${sizeInMB}`);
       
       // Log completo de la respuesta
-      console.log('✅ RESPUESTA COMPLETA DEL SERVIDOR:', res.data);
-      console.log('📋 Estructura recibida:', Object.keys(res.data));
+      // console.log('✅ RESPUESTA COMPLETA DEL SERVIDOR:', res.data);
+      // console.log('📋 Estructura recibida:', Object.keys(res.data));
       if (res.data.data) {
-        console.log('📦 Claves en data:', Object.keys(res.data.data));
+        // console.log('📦 Claves en data:', Object.keys(res.data.data));
       }
       
       if (res.data.success) {
-        console.log('📊 Cargando datos maestros...');
+        // console.log('📊 Cargando datos maestros...');
         const {
           brands = [],
           campaigns = [],
@@ -92,29 +92,29 @@ export const AppProvider = ({ children }) => {
           hasMore: false
         });
         
-        console.log('📈 RESUMEN DATOS CARGADOS:', {
-          brands: brands.length,
-          campaigns: campaigns.length,
-          categories: categories.length,
-          advertisers: advertisers.length,
-          oohTypes: oohTypes.length,
-          cities: cities.length,
-          addresses: addresses.length,
-          providers: providers.length,
-          regions: regions.length
-        });
+        // console.log('📈 RESUMEN DATOS CARGADOS:', {
+        //   brands: brands.length,
+        //   campaigns: campaigns.length,
+        //   categories: categories.length,
+        //   advertisers: advertisers.length,
+        //   oohTypes: oohTypes.length,
+        //   cities: cities.length,
+        //   addresses: addresses.length,
+        //   providers: providers.length,
+        //   regions: regions.length
+        // });
         
         // Log detallado de cada tipo de dato
-        console.log('🏷️ BRANDS:', brands);
-        console.log('📋 CAMPAIGNS:', campaigns);
-        console.log('📂 CATEGORIES:', categories);
-        console.log('🏢 ADVERTISERS:', advertisers);
-        console.log('🚀 OOH_TYPES:', oohTypes);
-        console.log('🏙️ CITIES:', cities);
-        console.log('📍 ADDRESSES:', addresses);
-        console.log('🏭 PROVIDERS:', providers);
-        console.log('🗺️ REGIONS:', regions);
-        console.log('📊 RECORDS: (carga paginada)');
+        // console.log('🏷️ BRANDS:', brands);
+        // console.log('📋 CAMPAIGNS:', campaigns);
+        // console.log('📂 CATEGORIES:', categories);
+        // console.log('🏢 ADVERTISERS:', advertisers);
+        // console.log('🚀 OOH_TYPES:', oohTypes);
+        // console.log('🏙️ CITIES:', cities);
+        // console.log('📍 ADDRESSES:', addresses);
+        // console.log('🏭 PROVIDERS:', providers);
+        // console.log('🗺️ REGIONS:', regions);
+        // console.log('📊 RECORDS: (carga paginada)');
         
         setInitialized(true);
       } else {
@@ -201,7 +201,7 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   // Cargar todos los registros con paginación
-  const fetchRecords = useCallback(async (page = 1, limit = 20, options = {}) => {
+  const fetchRecords = useCallback(async (page = 1, limit = 30, options = {}) => {
     setLoading(true);
     try {
       const params = { page, limit };
@@ -211,7 +211,7 @@ export const AppProvider = ({ children }) => {
       if (options.ano) {
         params.ano = options.ano;
       }
-      console.log(`📄 Cargando registros: page=${page}, limit=${limit}, mes=${options.mes}`);
+      // console.log(`📄 Cargando registros: page=${page}, limit=${limit}, mes=${options.mes}`);
       const res = await axios.get(`${API_URL}/api/ooh/all`, { params });
       if (res.data.success) {
         const append = options.append === true;
@@ -361,7 +361,8 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  const value = {
+  // 🔧 Memoizar el valor del contexto para evitar re-renders innecesarios
+  const value = useMemo(() => ({
     // Datos maestros
     brands,
     campaigns,
@@ -392,7 +393,31 @@ export const AppProvider = ({ children }) => {
     createCampaign,
     createOohType,
     saveRecord
-  };
+  }), [
+    brands,
+    campaigns,
+    categories,
+    advertisers,
+    oohTypes,
+    cities,
+    addresses,
+    providers,
+    regions,
+    records,
+    recordsPagination,
+    loading,
+    initialized,
+    initializeApp,
+    fetchBrands,
+    fetchCampaigns,
+    fetchOohTypes,
+    fetchCities,
+    fetchRecords,
+    createBrand,
+    createCampaign,
+    createOohType,
+    saveRecord
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

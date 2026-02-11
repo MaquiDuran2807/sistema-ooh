@@ -7,11 +7,12 @@ let cron = null;
 try {
   cron = require('node-cron');
 } catch (err) {
-  console.warn('⚠️ node-cron no está disponible. Instala con: npm install node-cron');
+  // console.warn('⚠️ node-cron no está disponible. Instala con: npm install node-cron');
 }
 require('dotenv').config();
 
 const oohRoutes = require('./routes/ooh');
+const excelAutomationRoutes = require('./routes/excelAutomation');
 const localStorageService = require('./services/localStorageService');
 const dbService = require('./services/dbService');
 
@@ -19,54 +20,51 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const USE_BIGQUERY = process.env.USE_BIGQUERY === 'true' || false;
 const BIGQUERY_DAILY_SYNC = process.env.BIGQUERY_DAILY_SYNC !== 'false';
-const BIGQUERY_SYNC_CRON = process.env.BIGQUERY_SYNC_CRON || '0 2 * * *';
+const BIGQUERY_SYNC_CRON = process.env.BIGQUERY_SYNC_CRON || '0 18 * * *';
 
-// Middleware
-app.use(cors());
+// Middleware CORS - Permitir Power Automate y localhost
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permitir requests sin origin (como Power Automate, Postman, etc)
+    if (!origin) return callback(null, true);
+    
+    // Lista de orígenes permitidos
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:8080',
+      'https://flow.microsoft.com',  // Power Automate
+      /^https:\/\/.*\.logic\.azure\.com$/,  // Azure Logic Apps
+      /^https:\/\/.*\.azurewebsites\.net$/   // Azure Web Apps
+    ];
+    
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed;
+      }
+      // Si es RegExp
+      return allowed.test(origin);
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      // console.log('⚠️ CORS bloqueado para origin:', origin);
+      callback(null, true); // En desarrollo, permitir todos por ahora
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Middleware para logging de todas las peticiones
-app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log('\n========================================');
-  console.log(`[${timestamp}] ${req.method} ${req.url}`);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-  }
-  
-  // Interceptar la respuesta
-  const originalSend = res.send;
-  res.send = function(data) {
-    console.log(`[${timestamp}] Respuesta: ${res.statusCode}`);
-    if (data) {
-      try {
-        // Si es Buffer o no es string, no intentes parsearlo
-        if (Buffer.isBuffer(data)) {
-          console.log('Response Body: [Binary Data - PPT file]');
-        } else {
-          const parsed = JSON.parse(data);
-          console.log('Response Body:', JSON.stringify(parsed, null, 2));
-        }
-      } catch {
-        // Si falla el parse, intenta substring solo si es string
-        if (typeof data === 'string') {
-          console.log('Response Body:', data.substring(0, 200));
-        } else {
-          console.log('Response Body: [Non-JSON Response]');
-        }
-      }
-    }
-    console.log('========================================\n');
-    originalSend.call(this, data);
-  };
-  
-  next();
-});
-
 // Rutas
 app.use('/api/ooh', oohRoutes);
+app.use('/api/automation', excelAutomationRoutes);  // ← Nueva ruta para Power Automate
 
 // Servir imágenes locales (para desarrollo) - soporta subcarpetas
 app.get('/api/images/*', (req, res) => {
@@ -101,15 +99,15 @@ process.on('uncaughtException', (error) => {
 });
 
 const start = async () => {
-  console.log(`✅ Servidor ejecutándose en puerto ${PORT}`);
-  console.log(`   Frontend: http://localhost:3000`);
-  console.log(`   Backend: http://localhost:${PORT}`);
-  console.log(`   Health: http://localhost:${PORT}/health`);
+  // console.log(`✅ Servidor ejecutándose en puerto ${PORT}`);
+  // console.log(`   Frontend: http://localhost:3000`);
+  // console.log(`   Backend: http://localhost:${PORT}`);
+  // console.log(`   Health: http://localhost:${PORT}/health`);
   
   // Inicializar BD
   try {
     await dbService.initDB();
-    console.log('✅ Base de datos inicializada');
+
   } catch (error) {
     console.error('❌ Error inicializando BD:', error);
   }
@@ -125,9 +123,9 @@ const start = async () => {
         let body = '';
         res.on('data', chunk => { body += chunk; });
         res.on('end', () => {
-          console.log(`📊 [BIGQUERY SYNC] (${reason}) Status: ${res.statusCode}`);
+          // console.log(`📊 [BIGQUERY SYNC] (${reason}) Status: ${res.statusCode}`);
           if (body) {
-            console.log(`📊 [BIGQUERY SYNC] (${reason}) Response: ${body.substring(0, 200)}`);
+            // console.log(`📊 [BIGQUERY SYNC] (${reason}) Response: ${body.substring(0, 200)}`);
           }
           resolve();
         });
@@ -143,18 +141,18 @@ const start = async () => {
   // Programar sincronización diaria (si está habilitada)
   if (USE_BIGQUERY && BIGQUERY_DAILY_SYNC) {
     if (!cron) {
-      console.warn('⚠️ BigQuery sync diario no se programó: node-cron no está instalado');
+      // console.warn('⚠️ BigQuery sync diario no se programó: node-cron no está instalado');
     } else if (cron.validate(BIGQUERY_SYNC_CRON)) {
       cron.schedule(BIGQUERY_SYNC_CRON, () => {
-        console.log(`🕒 [BIGQUERY SYNC] Ejecutando sync programado (${BIGQUERY_SYNC_CRON})`);
+        // console.log(`🕒 [BIGQUERY SYNC] Ejecutando sync programado (${BIGQUERY_SYNC_CRON})`);
         triggerBigQuerySync('cron').catch(() => {});
       });
-      console.log(`🕒 BigQuery sync diario programado: ${BIGQUERY_SYNC_CRON}`);
+      // console.log(`🕒 BigQuery sync diario programado: ${BIGQUERY_SYNC_CRON}`);
     } else {
-      console.warn(`⚠️ BIGQUERY_SYNC_CRON inválido: ${BIGQUERY_SYNC_CRON}`);
+      // console.warn(`⚠️ BIGQUERY_SYNC_CRON inválido: ${BIGQUERY_SYNC_CRON}`);
     }
   } else if (USE_BIGQUERY) {
-    console.log('🕒 BigQuery sync diario desactivado (BIGQUERY_DAILY_SYNC=false)');
+    // console.log('🕒 BigQuery sync diario desactivado (BIGQUERY_DAILY_SYNC=false)');
   }
 };
 

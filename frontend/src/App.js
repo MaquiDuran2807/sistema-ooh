@@ -1,14 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import './App.css';
 import OOHForm from './components/OOHForm';
 import OOHList from './components/OOHList';
 import DebugPanel from './components/DebugPanel';
+import ScrollToTop from './components/ScrollToTop';
 import { AppProvider, useApp } from './context/AppContext';
 
-function AppContent() {
+// 🔧 Memoizar AppContent para prevenir re-renders cuando el contexto global cambia
+// Solo se re-renderiza cuando loading, initialized, activeTab o refreshList cambian
+const AppContent = memo(() => {
   const [activeTab, setActiveTab] = useState('form');
   const [refreshList, setRefreshList] = useState(false);
   const { initializeApp, loading, initialized } = useApp();
+  
+  // 🐛 DEBUG: Detectar cuándo App.js se re-renderiza
+  useEffect(() => {
+    console.log('🔄 [APP] AppContent se re-renderizó');
+  });
 
   // Inicializar app al montar
   useEffect(() => {
@@ -61,13 +69,19 @@ function AppContent() {
 
       <div className="tab-content">
         {activeTab === 'form' && <OOHForm onSuccess={handleFormSuccess} />}
-        {activeTab === 'list' && <OOHList refreshTrigger={refreshList} />}
+        {activeTab === 'list' && (
+          <OOHList 
+            key="ooh-list-stable"
+            refreshTrigger={refreshList} 
+          />
+        )}
       </div>
 
       <DebugPanel />
+      <ScrollToTop />
     </div>
   );
-}
+});
 
 function App() {
   return (

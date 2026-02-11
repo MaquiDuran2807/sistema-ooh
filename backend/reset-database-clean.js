@@ -154,6 +154,16 @@ const TIPOS_OOH = [
   'DIGITAL'
 ];
 
+// ESTADOS OOH
+const ESTADOS_OOH = [
+  'ACTIVO',
+  'ARRIENDO',
+  'PRODUCCION',
+  'BONIFICADO',
+  'CONSUMO',
+  'INACTIVO'
+];
+
 // 3 PROVEEDORES
 const PROVEEDORES = [
   'APX',
@@ -235,14 +245,21 @@ async function resetDatabase() {
     console.log('   📋 Creando tabla: ooh_types');
     db.run(`CREATE TABLE ooh_types (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nombre TEXT NOT NULL UNIQUE,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      nombre TEXT NOT NULL UNIQUE,      descripcion TEXT,      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
     console.log('   📋 Creando tabla: providers');
     db.run(`CREATE TABLE providers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    console.log('   📋 Creando tabla: ooh_states');
+    db.run(`CREATE TABLE ooh_states (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE,
+      descripcion TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
@@ -275,25 +292,25 @@ async function resetDatabase() {
       brand_id INTEGER NOT NULL,
       campaign_id INTEGER NOT NULL,
       ooh_type_id INTEGER NOT NULL,
-      address_id INTEGER NOT NULL,
       provider_id INTEGER NOT NULL,
+      address_id INTEGER NOT NULL,
+      estado_id INTEGER DEFAULT 1,
       checked INTEGER DEFAULT 0,
-      anunciante TEXT DEFAULT 'ABI',
-      estado TEXT,
-      fecha_inicio TEXT,
+      review_required INTEGER DEFAULT 0,
+      review_reason TEXT,
+      fecha_inicio TEXT NOT NULL,
       fecha_final TEXT,
-      imagen_1 TEXT,
-      imagen_2 TEXT,
-      imagen_3 TEXT,
       synced_to_bigquery DATETIME,
       bq_sync_status TEXT DEFAULT 'pending',
+      last_bigquery_sync DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (brand_id) REFERENCES brands(id),
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
       FOREIGN KEY (ooh_type_id) REFERENCES ooh_types(id),
+      FOREIGN KEY (provider_id) REFERENCES providers(id),
       FOREIGN KEY (address_id) REFERENCES addresses(id),
-      FOREIGN KEY (provider_id) REFERENCES providers(id)
+      FOREIGN KEY (estado_id) REFERENCES ooh_states(id)
     )`);
     
     console.log('   📋 Creando tabla: images');
@@ -301,13 +318,16 @@ async function resetDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ooh_record_id TEXT NOT NULL,
       ruta TEXT NOT NULL,
-      orden INTEGER DEFAULT 1,
+      orden INTEGER NOT NULL DEFAULT 1,
+      role TEXT DEFAULT 'gallery',
+      slot INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (ooh_record_id) REFERENCES ooh_records(id) ON DELETE CASCADE,
       UNIQUE(ooh_record_id, orden)
     )`);
     
-    console.log('\n   ✅ 11 tablas creadas exitosamente\n');
+    console.log('\n   ✅ 12 tablas creadas exitosamente\n');
     
     // PASO 4: Insertar REGIONES
     console.log('🗺️  PASO 4: Insertando REGIONES\n');
@@ -433,6 +453,26 @@ async function resetDatabase() {
     oohTypeStmt.free();
     console.log(`\n   Total: ${TIPOS_OOH.length} tipos\n`);
     
+    // PASO 10.5: Insertar ESTADOS OOH
+    console.log('🟢 PASO 10.5: Insertando ESTADOS OOH\n');
+    const estadoMap = {
+      'ACTIVO': 'Registro activo y vigente',
+      'ARRIENDO': 'Disponible en arriendo',
+      'PRODUCCION': 'En producción',
+      'BONIFICADO': 'Bonificado por campaña',
+      'CONSUMO': 'En consumo',
+      'INACTIVO': 'Registro inactivo'
+    };
+    const oohStateStmt = db.prepare('INSERT INTO ooh_states (nombre, descripcion) VALUES (?, ?)');
+    for (const estado of ESTADOS_OOH) {
+      oohStateStmt.bind([estado, estadoMap[estado] || '']);
+      oohStateStmt.step();
+      oohStateStmt.reset();
+      console.log(`   ✅ ${estado}`);
+    }
+    oohStateStmt.free();
+    console.log(`\n   Total: ${ESTADOS_OOH.length} estados\n`);
+    
     // PASO 11: Insertar PROVEEDORES
     console.log('🚚 PASO 11: Insertando PROVEEDORES\n');
     const providerStmt = db.prepare('INSERT INTO providers (nombre) VALUES (?)');
@@ -488,6 +528,7 @@ async function resetDatabase() {
       marcas: db.exec('SELECT COUNT(*) as total FROM brands')[0].values[0][0],
       campañas: db.exec('SELECT COUNT(*) as total FROM campaigns')[0].values[0][0],
       tipos_ooh: db.exec('SELECT COUNT(*) as total FROM ooh_types')[0].values[0][0],
+      estados_ooh: db.exec('SELECT COUNT(*) as total FROM ooh_states')[0].values[0][0],
       proveedores: db.exec('SELECT COUNT(*) as total FROM providers')[0].values[0][0],
       ciudades: db.exec('SELECT COUNT(*) as total FROM cities')[0].values[0][0],
       direcciones: db.exec('SELECT COUNT(*) as total FROM addresses')[0].values[0][0],
@@ -504,6 +545,7 @@ async function resetDatabase() {
     console.log(`   ║  Marcas:          ${String(verification.marcas).padStart(4)} ✅        ║`);
     console.log(`   ║  Campañas:        ${String(verification.campañas).padStart(4)} ✅        ║`);
     console.log(`   ║  Tipos OOH:       ${String(verification.tipos_ooh).padStart(4)} ✅        ║`);
+    console.log(`   ║  Estados OOH:     ${String(verification.estados_ooh).padStart(4)} ✅        ║`);
     console.log(`   ║  Proveedores:     ${String(verification.proveedores).padStart(4)} ✅        ║`);
     console.log(`   ║  Ciudades:        ${String(verification.ciudades).padStart(4)} ✅        ║`);
     console.log('   ╠═══════════════════════════════════════╣');

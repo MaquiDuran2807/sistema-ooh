@@ -34,6 +34,14 @@ Sistema integral para gestionar vallas publicitarias (Out of Home) con arquitect
   - Campo JSON con registro completo para flexibilidad
 - **Arquitectura Híbrida**: SQLite local + GCP cloud (configurable)
 
+### ⚡ Power Automate Integration (Nuevo)
+- **Procesamiento automático**: Detecta archivos Excel en OneDrive/SharePoint
+- **Validación en batch**: Valida registros contra base de datos
+- **Respuestas JSON estructuradas**: Devuelve errores detallados para que Power Automate envíe emails
+- **CORS configurado**: Compatible con Microsoft Flow y Azure Logic Apps
+- **Sin dependencias de email**: Power Automate maneja las notificaciones
+- **Setup rápido**: Guía en [QUICK_START_POWER_AUTOMATE.md](QUICK_START_POWER_AUTOMATE.md)
+
 ---
 
 ## 🚀 Inicio Rápido

@@ -4,9 +4,11 @@ import './OOHList.css';
 import { useApp } from '../context/AppContext';
 import dbService from '../services/dbService';
 import RecordCard from './RecordCard';
+import RecordTableView from './RecordTableView';
+import RecordCardsView from './RecordCardsView';
 
 const OOHList = ({ refreshTrigger }) => {
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 30;
   const PREFETCH_MARGIN_PX = 6000; // Cargar mucho antes de llegar al final
 
   const LazyImage = ({ src, alt, className, placeholder, onError }) => {
@@ -48,12 +50,6 @@ const OOHList = ({ refreshTrigger }) => {
   };
 
   const { 
-    records, 
-    setRecords,
-    fetchRecords, 
-    recordsPagination,
-    setRecordsPagination,
-    loading: contextLoading,
     brands,
     campaigns: campaignsList,
     cities: citiesList,
@@ -61,6 +57,15 @@ const OOHList = ({ refreshTrigger }) => {
     providers: providersList
   } = useApp();
   
+  // 🔧 ESTADO LOCAL: No usar el contexto global para paginación
+  const [records, setRecords] = useState([]);
+  const [recordsPagination, setRecordsPagination] = useState({
+    page: 1,
+    limit: 30,
+    total: 0,
+    totalPages: 0,
+    hasMore: false
+  });
   const [filteredData, setFilteredData] = useState([]);
   const [error, setError] = useState(null);
   const loadMoreRef = useRef(null);
@@ -84,35 +89,54 @@ const OOHList = ({ refreshTrigger }) => {
   const [marcas, setMarcas] = useState([]);
   const [campanas, setCampanas] = useState([]);
   
-  // Cargar períodos disponibles al montar
+  // 🔧 COMENTADO: Probar sin manipulación manual del scroll del navegador
+  // useEffect(() => {
+  //   if ('scrollRestoration' in window.history) {
+  //     const originalScrollRestoration = window.history.scrollRestoration;
+  //     window.history.scrollRestoration = 'manual';
+  //     console.log('🔧 [SCROLL] ScrollRestoration configurado a "manual"');
+  //     
+  //     return () => {
+  //       window.history.scrollRestoration = originalScrollRestoration;
+  //       console.log('🔧 [SCROLL] ScrollRestoration restaurado');
+  //     };
+  //   }
+  // }, []);
+  
+  // Cargar períodos disponibles al montar y establecer fecha actual del sistema como filtro por defecto
   useEffect(() => {
     const loadPeriods = async () => {
       try {
         const res = await axios.get('http://localhost:8080/api/ooh/periods/available');
         if (res.data.success) {
           setAvailablePeriods(res.data.data);
-          if (res.data.data.years.length > 0) {
-            const now = new Date();
-            const currentYear = now.getFullYear().toString();
-            const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-            const years = res.data.data.years.map(String);
-            const hasCurrentYear = years.includes(currentYear);
-            const defaultYear = hasCurrentYear ? currentYear : years[0];
-            setFilterAno(defaultYear);
-            const monthsForYear = res.data.data.periodsByYear[defaultYear] || [];
-            const defaultMonth = monthsForYear.includes(currentMonth)
-              ? currentMonth
-              : monthsForYear[monthsForYear.length - 1];
-            if (defaultMonth) {
-              setFilterMes(defaultMonth);
-            }
-            setFiltersReady(true);
-          } else {
-            setFiltersReady(true);
+          
+          // Usar siempre la fecha actual del sistema como filtro por defecto
+          const now = new Date();
+          let defaultYear = now.getFullYear().toString();
+          let defaultMonth = String(now.getMonth() + 1).padStart(2, '0');
+          
+          // Validar que el año existe en la BD
+          const yearsAvailable = res.data.data.years.map(String);
+          if (!yearsAvailable.includes(defaultYear)) {
+            // Si el año actual no existe, usar el primer año disponible
+            defaultYear = yearsAvailable[0] || '';
           }
+          
+          // Validar que el mes existe para el año seleccionado
+          const monthsForYear = res.data.data.periodsByYear[defaultYear] || [];
+          if (!monthsForYear.includes(defaultMonth)) {
+            // Si el mes actual no existe, usar el primer mes disponible del año
+            defaultMonth = monthsForYear[0] || '';
+          }
+          
+          setFilterAno(defaultYear);
+          setFilterMes(defaultMonth);
+          setFiltersReady(true);
         }
       } catch (error) {
         console.error('Error cargando períodos disponibles:', error);
+        setFiltersReady(true);
       }
     };
     loadPeriods();
@@ -315,7 +339,48 @@ const OOHList = ({ refreshTrigger }) => {
       return val;
     };
 
+  // 🔧 Fetch local de records (NO usa el contexto global)
+  const fetchRecordsLocal = useCallback(async (page = 1, limit = 30, options = {}) => {
+    try {
+      const params = { page, limit };
+      if (options.mes) {
+        params.mes = options.mes;
+      }
+      if (options.ano) {
+        params.ano = options.ano;
+      }
+      // console.log(`📄 [LOCAL FETCH] Cargando registros: page=${page}, limit=${limit}`);
+      const res = await axios.get('http://localhost:8080/api/ooh/all', { params });
+      if (res.data.success) {
+        const append = options.append === true;
+        setRecords(prev => {
+          if (!append) return res.data.data;
+          const combined = [...prev, ...res.data.data];
+          const seen = new Set();
+          return combined.filter(item => {
+            if (!item?.id) return false;
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+        });
+        if (res.data.pagination) {
+          setRecordsPagination(res.data.pagination);
+        }
+        return {
+          data: res.data.data,
+          pagination: res.data.pagination
+        };
+      }
+    } catch (error) {
+      console.error('Error cargando registros:', error);
+      return { data: [], pagination: null };
+    }
+  }, []);
+
   const loadPage = useCallback(async (page, append = false) => {
+    // console.log(`📄 [LOAD PAGE] Iniciando carga: page=${page}, append=${append}`);
+    
     setIsFetchingMore(true);
     try {
       const params = { append };
@@ -324,14 +389,22 @@ const OOHList = ({ refreshTrigger }) => {
       } else if (filterAno && !filterMes) {
         params.ano = filterAno;
       }
-      const result = await fetchRecords(page, PAGE_SIZE, params);
+      // console.log('📄 [LOAD PAGE] Parámetros:', params);
+      const result = await fetchRecordsLocal(page, PAGE_SIZE, params);
+      // console.log('📄 [LOAD PAGE] Resultado:', {
+      //   dataLength: result?.data?.length,
+      //   paginationTotal: result?.pagination?.total,
+      //   paginationHasMore: result?.pagination?.hasMore
+      // });
       setHasMorePages(!!result?.pagination?.hasMore);
+      // console.log('📄 [LOAD PAGE] hasMorePages actualizado a:', !!result?.pagination?.hasMore);
       pageRef.current = page;
+      
       return result;
     } finally {
       setIsFetchingMore(false);
     }
-  }, [fetchRecords, PAGE_SIZE, filterAno, filterMes]);
+  }, [fetchRecordsLocal, filterAno, filterMes]);
 
   useEffect(() => {
     if (!filtersReady) return;
@@ -339,11 +412,15 @@ const OOHList = ({ refreshTrigger }) => {
       const monthsForYear = availablePeriods.periodsByYear[filterAno] || [];
       if (monthsForYear.length > 0 && filterMes && !monthsForYear.includes(filterMes)) return;
     }
+    // console.log('🔄 [INIT] Reiniciando lista, cargando página 1');
     pageRef.current = 1;
     setRecords([]);
-    setRecordsPagination({ page: 1, limit: 20, total: 0, totalPages: 0, hasMore: false });
+    setRecordsPagination({ page: 1, limit: 30, total: 0, totalPages: 0, hasMore: false });
+    setHasMorePages(true); // Reset hasMorePages antes de cargar
     loadPage(1, false);
-  }, [loadPage, refreshTrigger, filterAno, filterMes, filtersReady, availablePeriods.periodsByYear, setRecords, setRecordsPagination]);
+    // 🔧 setRecords y setRecordsPagination NO en dependencias (son estables de useState)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadPage, refreshTrigger, filterAno, filterMes, filtersReady, availablePeriods.periodsByYear]);
 
   // Actualizar datos locales cuando el contexto cambia
   useEffect(() => {
@@ -405,7 +482,13 @@ const OOHList = ({ refreshTrigger }) => {
     applyFilters();
   }, [applyFilters]);
 
-  const hasActiveFilters = !!(searchDireccion || filterMarca || filterCampana || filterFechaInicio || filterFechaFin);
+  // Filtros de búsqueda/texto que requieren filtrado en frontend
+  const hasTextFilters = !!(searchDireccion || filterMarca || filterCampana || filterFechaInicio || filterFechaFin);
+  // Filtros de fecha que se aplican en backend y permiten paginación
+  const hasDateFilters = !!(filterAno || filterMes);
+  // Para compatibilidad con código existente
+  const hasActiveFilters = hasTextFilters;
+  
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -447,12 +530,20 @@ const OOHList = ({ refreshTrigger }) => {
   }, [displayData]);
 
   const skeletonCount = useMemo(() => {
-    if (hasActiveFilters) return 0;
-    const total = recordsPagination?.total || loadedRecords.length || 0;
-    return Math.max(total - loadedRecords.length, 0);
-  }, [hasActiveFilters, recordsPagination?.total, loadedRecords.length]);
+    // Calcular cuántos skeletons faltan por cargar
+    if (hasActiveFilters && records.length > 0) return 0;
+    const total = recordsPagination?.total || 0;
+    const loaded = records.length || 0;
+    const remaining = Math.max(total - loaded, 0);
+    // console.log('🎯 [SKELETONS] total:', total, 'loaded:', loaded, 'remaining:', remaining);
+    return remaining;
+  }, [hasActiveFilters, recordsPagination?.total, loadedRecords.length, records.length]);
 
-  const hasMoreRecords = !hasActiveFilters && (hasMorePages || isFetchingMore);
+  // Permitir paginación cuando solo hay filtros de fecha (backend paginado) o sin filtros
+  const hasMoreRecords = !hasTextFilters && (hasMorePages || isFetchingMore);
+  
+
+  
   const areAllVisibleSelected = useMemo(() => {
     if (visibleRecords.length === 0) return false;
     return visibleRecords.every(record => selectedCards.has(record.id));
@@ -462,32 +553,69 @@ const OOHList = ({ refreshTrigger }) => {
     if (hasActiveFilters) {
       return displayData.length;
     }
-    const total = recordsPagination?.total ?? 0;
+    const total = recordsPagination?.total ?? records.length ?? 0;
+    // console.log('📊 [PAGINACIÓN] totalCount calculado:', {
+    //   recordsLength: records.length,
+    //   paginationTotal: recordsPagination?.total,
+    //   loadedRecordsLength: records.length,
+    //   hasActiveFilters
+    // });
     return total;
-  }, [hasActiveFilters, displayData.length, recordsPagination?.total]);
+  }, [hasActiveFilters, displayData.length, recordsPagination?.total, records.length]);
+
+  // Refs para el observer - para evitar que las dependencias del useEffect cambien constantemente
+  const observerStateRef = useRef({ hasTextFilters: false, isFetchingMore: false, hasMorePages: true });
+
+  // Actualizar los refs cuando los valores cambien
+  useEffect(() => {
+    observerStateRef.current = {
+      hasTextFilters,
+      isFetchingMore,
+      hasMorePages
+    };
+  }, [hasTextFilters, isFetchingMore, hasMorePages]);
 
   useEffect(() => {
-    if (!loadMoreRef.current) return;
+    if (!loadMoreRef.current) {
+      return;
+    }
+    
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
+        // console.log('👁️ [OBSERVER] Callback disparado, isIntersecting:', entry.isIntersecting, 'boundingRect:', entry.boundingClientRect);
         if (!entry.isIntersecting) return;
-        if (hasActiveFilters) return;
-        if (isFetchingMore || !hasMorePages) return;
+        
+        const state = observerStateRef.current;
+        // console.log('📊 [OBSERVER] Estado actual:', state);
+        
+        if (state.isFetchingMore) {
+          // console.log('⏳ [OBSERVER] Ya está cargando, ignorando');
+          return;
+        }
+        
+        if (!state.hasMorePages) {
+          // console.log('✋ [OBSERVER] No hay más páginas');
+          return;
+        }
 
         const nextPage = pageRef.current + 1;
+        // console.log(`📥 [OBSERVER] ¡CARGANDO página ${nextPage}!`);
         loadPage(nextPage, true);
       },
       {
         root: null,
-        rootMargin: `${PREFETCH_MARGIN_PX}px`,
-        threshold: 0.1
+        rootMargin: '2000px', // Cargar 2000px ANTES de llegar al skeleton
+        threshold: 0.01
       }
     );
 
     observer.observe(loadMoreRef.current);
-    return () => observer.disconnect();
-  }, [PREFETCH_MARGIN_PX, hasActiveFilters, hasMorePages, isFetchingMore, loadPage]);
+    
+    return () => {
+      observer.disconnect();
+    };
+  }, [PREFETCH_MARGIN_PX, loadPage, hasMorePages, isFetchingMore, skeletonCount, viewMode]);
 
   const clearFilters = () => {
     setSearchDireccion('');
@@ -534,8 +662,8 @@ const OOHList = ({ refreshTrigger }) => {
 
     try {
       setIsDownloading(true);
-      console.log(`📥 Descargando PPT de VAYAS para ${reportMonth}...`);
-      console.log(`   Método: ${reportMethod === 'base' ? 'Con archivo base (Python)' : 'Desde cero (PptxGenJS)'}`);
+      // console.log(`📥 Descargando PPT de VAYAS para ${reportMonth}...`);
+      // console.log(`   Método: ${reportMethod === 'base' ? 'Con archivo base (Python)' : 'Desde cero (PptxGenJS)'}`);
       
       const response = await axios.get('http://localhost:8080/api/ooh/report/ppt', {
         params: { 
@@ -556,7 +684,7 @@ const OOHList = ({ refreshTrigger }) => {
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-      console.log('✅ PPT descargado exitosamente');
+      // console.log('✅ PPT descargado exitosamente');
       alert('✅ Reporte PPT descargado correctamente');
       closeReportModal();
     } catch (error) {
@@ -578,9 +706,11 @@ const OOHList = ({ refreshTrigger }) => {
   };
 
   const openModal = (record) => {
+    console.log('🔍 [MODAL] Abriendo modal con registro:', record);
     setSelectedRecord(record);
     setEditData({
       id: record.id,
+      // Guardar nombres para mostrar
       marca: record.marca,
       categoria: record.categoria,
       proveedor: record.proveedor,
@@ -592,7 +722,20 @@ const OOHList = ({ refreshTrigger }) => {
       longitud: record.longitud,
       fechaInicio: record.fecha_inicio,
       fechaFin: record.fecha_final,
-      tipoOOH: record.tipo_ooh
+      tipoOOH: record.tipo_ooh,
+      // ✅ NUEVO: Guardar IDs originales del registro
+      brand_id: record.brand_id,
+      campaign_id: record.campaign_id,
+      ooh_type_id: record.ooh_type_id,
+      provider_id: record.provider_id,
+      city_id: record.city_id
+    });
+    console.log('🔍 [MODAL] IDs guardados:', {
+      brand_id: record.brand_id,
+      campaign_id: record.campaign_id,
+      ooh_type_id: record.ooh_type_id,
+      provider_id: record.provider_id,
+      city_id: record.city_id
     });
     setEditMode(false);
     setShowModal(true);
@@ -703,7 +846,7 @@ const OOHList = ({ refreshTrigger }) => {
     setIsDeleting(true);
     try {
       const idsToDelete = Array.from(selectedCards);
-      console.log(`🗑️  Eliminando ${idsToDelete.length} registros...`);
+      // console.log(`🗑️  Eliminando ${idsToDelete.length} registros...`);
 
       // Eliminar uno por uno
       const results = await Promise.all(
@@ -754,32 +897,17 @@ const OOHList = ({ refreshTrigger }) => {
       console.log('🔄 [OOHLIST - ACTUALIZAR] Editando registro existente ID:', editData.id);
       console.log('📝 Datos actuales:', editData);
       
-      // ✅ NUEVO: Obtener IDs desde AppContext (no enviar nombres)
-      console.log('🔍 [ACTUALIZAR] Mapeando nombres a IDs...');
+      // ✅ USAR IDs ORIGINALES del registro (no buscar por nombre)
+      console.log('✅ [ACTUALIZAR] Usando IDs originales del registro:');
+      console.log(`   brand_id: ${editData.brand_id}`);
+      console.log(`   campaign_id: ${editData.campaign_id}`);
+      console.log(`   ooh_type_id: ${editData.ooh_type_id}`);
+      console.log(`   provider_id: ${editData.provider_id}`);
+      console.log(`   city_id: ${editData.city_id}`);
       
-      const brand = await dbService.getBrandByName(editData.marca, brands);
-      const city = await dbService.getCityByName(editData.ciudad, citiesList);
-      const oohType = await dbService.getOOHTypeByName(editData.tipoOOH, oohTypesList);
-      const provider = await dbService.getProviderByName(editData.proveedor, providersList);
-      const campaign = await dbService.getCampaignByName(editData.campana, campaignsList);
-      
-      console.log('📊 [ACTUALIZAR] IDs obtenidos:');
-      console.log(`   brand_id: ${brand?.id} (${editData.marca})`);
-      console.log(`   city_id: ${city?.id} (${editData.ciudad})`);
-      console.log(`   ooh_type_id: ${oohType?.id} (${editData.tipoOOH})`);
-      console.log(`   provider_id: ${provider?.id} (${editData.proveedor})`);
-      console.log(`   campaign_id: ${campaign?.id} (${editData.campana})`);
-      
-      // Validar que se obtuvieron todos los IDs
-      if (!brand?.id || !city?.id || !oohType?.id || !provider?.id || !campaign?.id) {
-        const missing = [];
-        if (!brand?.id) missing.push(`marca "${editData.marca}"`);
-        if (!city?.id) missing.push(`ciudad "${editData.ciudad}"`);
-        if (!oohType?.id) missing.push(`tipo OOH "${editData.tipoOOH}"`);
-        if (!provider?.id) missing.push(`proveedor "${editData.proveedor}"`);
-        if (!campaign?.id) missing.push(`campaña "${editData.campana}"`);
-        
-        alert(`❌ No se encontraron: ${missing.join(', ')}. Verifica los datos ingresados.`);
+      // Validar que tenemos los IDs
+      if (!editData.brand_id || !editData.campaign_id || !editData.ooh_type_id || !editData.provider_id || !editData.city_id) {
+        alert('❌ Error: Faltan IDs en el registro. Cierra y vuelve a abrir el modal.');
         return;
       }
       
@@ -787,12 +915,12 @@ const OOHList = ({ refreshTrigger }) => {
       const formData = new FormData();
       formData.append('existingId', editData.id); // ← ESTO INDICA AL BACKEND QUE ES UPDATE
       
-      // ✅ ENVIAR IDs en lugar de nombres
-      formData.append('brand_id', brand.id);
-      formData.append('campaign_id', campaign.id);
-      formData.append('city_id', city.id);
-      formData.append('ooh_type_id', oohType.id);
-      formData.append('provider_id', provider.id);
+      // ✅ ENVIAR IDs originales
+      formData.append('brand_id', editData.brand_id);
+      formData.append('campaign_id', editData.campaign_id);
+      formData.append('city_id', editData.city_id);
+      formData.append('ooh_type_id', editData.ooh_type_id);
+      formData.append('provider_id', editData.provider_id);
       
       // ✅ CAMPOS COMUNES (sin nombres)
       formData.append('direccion', editData.direccion);
@@ -804,16 +932,16 @@ const OOHList = ({ refreshTrigger }) => {
       // Agregar nuevas imágenes si se seleccionaron (por slot)
       const slots = Object.keys(imageReplacements);
       if (slots.length > 0) {
-        console.log(`🖼️ [ACTUALIZAR] Reemplazando ${slots.length} imagen(es) en slots:`, slots);
+        // console.log(`🖼️ [ACTUALIZAR] Reemplazando ${slots.length} imagen(es) en slots:`, slots);
         formData.append('imageIndexes', slots.join(',')); // slots en base 1
         slots.forEach(slot => {
           formData.append('imagenes', imageReplacements[slot]);
         });
       } else {
-        console.log('🖼️ [ACTUALIZAR] Sin cambios de imágenes');
+        // console.log('🖼️ [ACTUALIZAR] Sin cambios de imágenes');
       }
 
-      console.log('📤 [ACTUALIZAR] Enviando a POST /api/ooh/create con existingId...');
+      // console.log('📤 [ACTUALIZAR] Enviando a POST /api/ooh/create con existingId...');
       const response = await axios.post('http://localhost:8080/api/ooh/create', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -821,7 +949,7 @@ const OOHList = ({ refreshTrigger }) => {
       });
       
       if (response.data.success) {
-        console.log('✅ [ACTUALIZAR] Registro actualizado exitosamente:', response.data);
+        // console.log('✅ [ACTUALIZAR] Registro actualizado exitosamente:', response.data);
         alert('✅ Registro actualizado correctamente');
         setEditMode(false);
         pageRef.current = 1;
@@ -856,14 +984,14 @@ const OOHList = ({ refreshTrigger }) => {
     return dateStr;
   };
 
-  if (contextLoading) {
-    return (
-      <div className="loading-container">
-        <div className="spinner"></div>
-        <p>Cargando registros...</p>
-      </div>
-    );
-  }
+  const handleRefresh = useCallback(() => {
+    // console.log('🔄 [REFRESH] Recargando registros...');
+    pageRef.current = 1;
+    setRecords([]);
+    setRecordsPagination({ page: 1, limit: 30, total: 0, totalPages: 0, hasMore: false });
+    setHasMorePages(true);
+    loadPage(1, false);
+  }, [loadPage]);
 
   if (error) {
     return (
@@ -888,7 +1016,7 @@ const OOHList = ({ refreshTrigger }) => {
   return (
     <div className="ooh-list-container">
       <div className="list-header">
-        <h2>Registros OOH ({visibleRecords.length} de {totalCount})</h2>
+        <h2>Registros OOH ({records.length} de {totalCount}){hasMoreRecords && ' ... cargando más'}</h2>
         <div className="header-buttons">
           {selectedCards.size > 0 && (
             <>
@@ -922,8 +1050,8 @@ const OOHList = ({ refreshTrigger }) => {
           <button onClick={openReportModal} className="report-btn" title="Generar Reporte PPT de VALLAS">
             📄 Generar Reporte PPT
           </button>
-          <button onClick={fetchRecords} className="refresh-btn">
-            🔄 Actualizar
+          <button onClick={handleRefresh} className="refresh-btn" disabled={isFetchingMore}>
+            {isFetchingMore ? '⏳ Actualizando...' : '🔄 Actualizar'}
           </button>
         </div>
       </div>
@@ -1028,97 +1156,36 @@ const OOHList = ({ refreshTrigger }) => {
           </button>
         </div>
       ) : viewMode === 'table' ? (
-        <div className="records-table-wrapper">
-          <table className="records-table">
-            <thead>
-              <tr>
-                <th>Marca</th>
-                <th>Campaña</th>
-                <th>Categoría</th>
-                <th>Ciudad</th>
-                <th>Dirección</th>
-                <th>Inicio</th>
-                <th>Fin</th>
-                <th>Tipo OOH</th>
-                <th>Proveedor</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loadedRecords.map((record) => (
-                <tr key={record.id} className="records-table-row" onClick={() => openModal(record)}>
-                  <td>{record.marca || '-'}</td>
-                  <td>{record.campana || '-'}</td>
-                  <td>{record.categoria || '-'}</td>
-                  <td>{record.ciudad || '-'}</td>
-                  <td>{record.direccion || '-'}</td>
-                  <td>{formatDate(record.fecha_inicio)}</td>
-                  <td>{formatDate(record.fecha_final)}</td>
-                  <td>{record.tipo_ooh || '-'}</td>
-                  <td>{record.proveedor || '-'}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      className={`check-btn-table ${record.checked ? 'checked' : ''} ${checkingStates[record.id] ? 'loading' : ''}`}
-                      onClick={(e) => handleCheckInTable(e, record.id, record.checked)}
-                      disabled={checkingStates[record.id]}
-                      title={record.checked ? 'Desmarcar como chequeado' : 'Marcar como chequeado'}
-                    >
-                      {record.checked ? '✓ Chequeado' : '○ Chequear'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {hasMoreRecords && !hasActiveFilters && (
-            <div ref={loadMoreRef} className="load-more-sentinel">
-              <div className="load-more-spinner" />
-              <span>Cargando más registros...</span>
-            </div>
-          )}
-        </div>
+        <RecordTableView
+          displayData={displayData}
+          records={records}
+          recordsPagination={recordsPagination}
+          hasTextFilters={hasTextFilters}
+          hasMoreRecords={hasMoreRecords}
+          loadMoreRef={loadMoreRef}
+          openModal={openModal}
+          formatDate={formatDate}
+          handleCheckInTable={handleCheckInTable}
+          checkingStates={checkingStates}
+          skeletonCount={Math.max(0, (recordsPagination?.total || 0) - records.length)}
+        />
       ) : (
-        <div className="records-grid">
-          {loadedRecords.map((record) => {
-            const isSelected = selectedCards.has(record.id);
-            return (
-              <RecordCard
-                key={record.id}
-                record={record}
-                isSelected={isSelected}
-                onSelect={toggleCardSelection}
-                onOpenModal={openModal}
-                formatDate={formatDate}
-                resolveImageUrl={resolveImageUrl}
-                LazyImage={LazyImage}
-                toggleCardSelection={toggleCardSelection}
-                onCheckedChange={handleCheckedChange}
-              />
-            );
-          })}
-
-          {hasMoreRecords && !hasActiveFilters && (
-            <div ref={loadMoreRef} className="load-more-sentinel">
-              <div className="load-more-spinner" />
-              <span>Cargando más registros...</span>
-            </div>
-          )}
-
-          {!hasActiveFilters && skeletonCount > 0 &&
-            Array.from({ length: skeletonCount }).map((_, idx) => (
-              <div key={`skeleton-${idx}`} className="record-card skeleton">
-                <div className="card-image skeleton-block" />
-                <div className="card-content">
-                  <div className="skeleton-line title" />
-                  <div className="skeleton-line" />
-                  <div className="skeleton-line" />
-                  <div className="skeleton-line" />
-                  <div className="skeleton-line short" />
-                </div>
-              </div>
-            ))}
-        </div>
+        <RecordCardsView
+          displayData={displayData}
+          records={records}
+          recordsPagination={recordsPagination}
+          hasTextFilters={hasTextFilters}
+          hasMoreRecords={hasMoreRecords}
+          loadMoreRef={loadMoreRef}
+          openModal={openModal}
+          formatDate={formatDate}
+          resolveImageUrl={resolveImageUrl}
+          LazyImage={LazyImage}
+          toggleCardSelection={toggleCardSelection}
+          handleCheckedChange={handleCheckedChange}
+          selectedCards={selectedCards}
+          skeletonCount={Math.max(0, (recordsPagination?.total || 0) - records.length)}
+        />
       )}
 
       {/* Modal de detalles */}
@@ -1311,6 +1378,12 @@ const OOHList = ({ refreshTrigger }) => {
                     <span>{selectedRecord.tipo_ooh}</span>
                   )}
                 </div>
+                {selectedRecord.review_required && (
+                  <div className="detail-row review-warning">
+                    <strong>⚠️ REQUIERE REVISIÓN:</strong>
+                    <span>{selectedRecord.review_reason}</span>
+                  </div>
+                )}
               </div>
 
               {/* Galería de imágenes - Las 3 imágenes */}
@@ -1396,27 +1469,6 @@ const OOHList = ({ refreshTrigger }) => {
             <div className="modal-footer">
               {!editMode ? (
                 <>
-                  <div className="footer-left">
-                    <div className="sync-status">
-                      {selectedRecord?.synced_to_bigquery ? (
-                        <>
-                          <span>✅ Sincronizado a BigQuery</span>
-                          <small>{new Date(selectedRecord.synced_to_bigquery).toLocaleString()}</small>
-                        </>
-                      ) : (
-                        <>
-                          <span>⏳ Pendiente de sincronizar</span>
-                          <button 
-                            className="modal-btn btn-confirm" 
-                            onClick={syncToBigQuery}
-                            disabled={isSyncingBQ}
-                          >
-                            {isSyncingBQ ? '⏳ Sincronizando...' : '✓ Confirmar a BigQuery'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
                   <div className="footer-right">
                     <button className="modal-btn btn-edit" onClick={() => setEditMode(true)}>
                       ✏️ Editar

@@ -19,11 +19,11 @@ const initializeBigQuery = async () => {
     const [datasetExists] = await dataset.exists();
     
     if (!datasetExists) {
-      console.log(`📊 Creando dataset: ${datasetId}`);
+      // console.log(`📊 Creando dataset: ${datasetId}`);
       await bigquery.createDataset(datasetId, {
         location: 'US', // Puedes cambiar la ubicación según necesites
       });
-      console.log(`✅ Dataset ${datasetId} creado`);
+      // console.log(`✅ Dataset ${datasetId} creado`);
     }
 
     // Verificar/crear tabla
@@ -31,7 +31,7 @@ const initializeBigQuery = async () => {
     const [tableExists] = await table.exists();
     
     if (!tableExists) {
-      console.log(`📊 Creando tabla: ${tableId}`);
+      // console.log(`📊 Creando tabla: ${tableId}`);
       const schema = [
         { name: 'id', type: 'STRING', mode: 'REQUIRED' },
         { name: 'brand_id', type: 'INTEGER', mode: 'REQUIRED' },
@@ -85,13 +85,13 @@ const initializeBigQuery = async () => {
       };
 
       await dataset.createTable(tableId, options);
-      console.log(`✅ Tabla ${tableId} creada`);
-      console.log(`   📅 Particionada por: MES/AÑO (end_date)`);
-      console.log(`   🏷️ Clusterizada por: brand_name, city_name`);
+      // console.log(`✅ Tabla ${tableId} creada`);
+      // console.log(`   📅 Particionada por: MES/AÑO (end_date)`);
+      // console.log(`   🏷️ Clusterizada por: brand_name, city_name`);
 
     }
 
-    console.log('✅ BigQuery inicializado correctamente');
+    // console.log('✅ BigQuery inicializado correctamente');
     return true;
   } catch (error) {
     console.error('❌ Error al inicializar BigQuery:', error);
@@ -141,7 +141,7 @@ const insertOOHRecord = async (record) => {
     };
 
     await table.insert([row]);
-    console.log(`✅ Registro ${record.id} insertado en BigQuery`);
+    // console.log(`✅ Registro ${record.id} insertado en BigQuery`);
     
     return { success: true, id: record.id };
   } catch (error) {
@@ -149,7 +149,7 @@ const insertOOHRecord = async (record) => {
     
     // Si el error es por filas duplicadas, intentar actualizar
     if (error.code === 409 || error.message?.includes('duplicate')) {
-      console.log('⚠️ Registro duplicado, intentando actualizar...');
+      // console.log('⚠️ Registro duplicado, intentando actualizar...');
       return await updateOOHRecord(record);
     }
     
@@ -230,7 +230,7 @@ const queryOOHRecords = async (filters = {}) => {
     
     const [rows] = await bigquery.query({ query, params });
     
-    console.log(`✅ Se encontraron ${rows.length} registros en BigQuery`);
+    // console.log(`✅ Se encontraron ${rows.length} registros en BigQuery`);
     return rows;
   } catch (error) {
     console.error('❌ Error al consultar BigQuery:', error);
@@ -284,7 +284,7 @@ const deleteOOHRecord = async (id) => {
       params: { id }
     });
     
-    console.log(`✅ Registro ${id} eliminado de BigQuery`);
+    // console.log(`✅ Registro ${id} eliminado de BigQuery`);
     return { success: true, id };
   } catch (error) {
     console.error('❌ Error al eliminar registro de BigQuery:', error);
@@ -332,16 +332,16 @@ const rebuildTableWithRecords = async (records = []) => {
     // Borrar tabla si existe
     const [exists] = await table.exists();
     if (exists) {
-      console.log(`🧹 Borrando tabla BigQuery: ${tableId}`);
+      // console.log(`🧹 Borrando tabla BigQuery: ${tableId}`);
       await table.delete();
     }
 
     // Crear tabla nuevamente
-    console.log('🛠️  Creando tabla BigQuery...');
+    // console.log('🛠️  Creando tabla BigQuery...');
     await initializeBigQuery();
 
     if (!records || records.length === 0) {
-      console.log('⚠️ No hay registros para cargar en BigQuery');
+      // console.log('⚠️ No hay registros para cargar en BigQuery');
       return { success: true, inserted: 0 };
     }
 
@@ -352,10 +352,10 @@ const rebuildTableWithRecords = async (records = []) => {
       const batch = records.slice(i, i + batchSize);
       await dataset.table(tableId).insert(batch, { ignoreUnknownValues: true });
       inserted += batch.length;
-      console.log(`📥 Batch insertado: ${inserted}/${records.length}`);
+      // console.log(`📥 Batch insertado: ${inserted}/${records.length}`);
     }
 
-    console.log(`✅ Carga completa en BigQuery: ${inserted} registros`);
+    // console.log(`✅ Carga completa en BigQuery: ${inserted} registros`);
     return { success: true, inserted };
   } catch (error) {
     console.error('❌ Error reconstruyendo tabla en BigQuery:', error);

@@ -59,13 +59,20 @@ const RecordCard = ({
   return (
     <div 
       key={record.id} 
-      className={`record-card ${isSelected ? 'selected' : ''}`} 
+      className={`record-card ${isSelected ? 'selected' : ''} ${record.review_required ? 'needs-review' : ''}`} 
       onClick={() => {
         if (isSelected || toggleCardSelection) {
           onSelect(record.id);
         }
       }}
     >
+      {/* Indicador de revisión requerida */}
+      {record.review_required ? (
+        <div className="review-badge" title={record.review_reason}>
+          ⚠️ REVISAR
+        </div>
+      ) : null}
+
       {/* Checkbox de selección */}
       <div className="card-select-checkbox">
         <input

@@ -73,7 +73,7 @@ const uploadToLocal = async (files, metadata = {}) => {
 
       await fs.promises.writeFile(filepath, pngBuffer);
       const absolutePath = path.normalize(filepath);
-      console.log(`Imagen guardada localmente: ${absolutePath}`);
+      // console.log(`Imagen guardada localmente: ${absolutePath}`);
       return absolutePath;
     });
 
@@ -122,13 +122,13 @@ const deleteFromLocal = async (imageUrl) => {
 
     // Seguridad: asegurar que la ruta está dentro de imagesDir
     if (!filepath.startsWith(imagesDir)) {
-      console.warn('Intento de eliminar archivo fuera de imagesDir');
+      // console.warn('Intento de eliminar archivo fuera de imagesDir');
       return;
     }
 
     if (fs.existsSync(filepath)) {
       fs.unlinkSync(filepath);
-      console.log(`Archivo eliminado: ${filename}`);
+      // console.log(`Archivo eliminado: ${filename}`);
     }
   } catch (error) {
     console.error('Error al eliminar archivo local:', error);

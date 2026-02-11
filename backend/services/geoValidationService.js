@@ -67,7 +67,7 @@ const validarCoordenadasPorCiudad = async (ciudad, latitud, longitud) => {
     const distanciaEnKm = (distanciaEnMetros / 1000).toFixed(2);
     const radioKm = infoCiudad.radio_km;
     
-    console.log(`📍 Validación geo: Ciudad=${infoCiudad.nombre}, Radio permitido=${radioKm}km, Distancia calculada=${distanciaEnKm}km`);
+    // console.log(`📍 Validación geo: Ciudad=${infoCiudad.nombre}, Radio permitido=${radioKm}km, Distancia calculada=${distanciaEnKm}km`);
     
     // Validar que esté dentro del radio permitido
     if (distanciaEnMetros > radioKm * 1000) {

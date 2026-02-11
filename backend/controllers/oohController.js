@@ -13,12 +13,6 @@ const USE_GCS = process.env.USE_GCS === 'true' || false;
 const USE_BIGQUERY = process.env.USE_BIGQUERY === 'true' || false;
 const USE_BIGQUERY_REALTIME = process.env.BIGQUERY_REALTIME === 'true' || false;
 
-console.log(`🔧 Configuración de almacenamiento:`);
-console.log(`   - Cloud Storage (GCS): ${USE_GCS ? 'ACTIVADO' : 'DESACTIVADO'}`);
-console.log(`   - BigQuery: ${USE_BIGQUERY ? 'ACTIVADO' : 'DESACTIVADO'}`);
-console.log(`   - BigQuery Realtime: ${USE_BIGQUERY_REALTIME ? 'ACTIVADO' : 'DESACTIVADO'}`);
-console.log(`   - Almacenamiento local: ${!USE_GCS ? 'ACTIVADO' : 'DESACTIVADO'}`);
-
 // Utilidades para fechas y texto
 const parseDateSafe = (value) => {
   if (!value) return null;
@@ -64,7 +58,7 @@ const normalizeDateToISO = (value) => {
   }
   
   if (!date || isNaN(date.getTime())) {
-    console.warn(`⚠️ No se pudo parsear fecha: "${valueStr}"`);
+    // console.warn(`⚠️ No se pudo parsear fecha: "${valueStr}"`);
     return null;
   }
   
@@ -126,7 +120,7 @@ const getLocalImagePath = (inputPath) => {
   // Si ya es absoluta, devolver normalizada
   if (path.isAbsolute(inputPath)) {
     const normalized = path.normalize(inputPath);
-    console.log(`🖼️ Ruta absoluta recibida, usando: ${normalized}`);
+    // console.log(`🖼️ Ruta absoluta recibida, usando: ${normalized}`);
     return normalized;
   }
 
@@ -137,7 +131,7 @@ const getLocalImagePath = (inputPath) => {
 
   // Si existe, devolver
   if (fs.existsSync(fullPath)) {
-    console.log(`🖼️ Convirtiendo ruta: ${inputPath} -> ${fullPath}`);
+    // console.log(`🖼️ Convirtiendo ruta: ${inputPath} -> ${fullPath}`);
     return fullPath;
   }
 
@@ -160,11 +154,11 @@ const getLocalImagePath = (inputPath) => {
   }
 
   if (found) {
-    console.log(`🖼️ Fallback encontrado: ${found}`);
+    // console.log(`🖼️ Fallback encontrado: ${found}`);
     return found;
   }
 
-  console.warn(`⚠️ Imagen no encontrada para ruta: ${inputPath}`);
+  // console.warn(`⚠️ Imagen no encontrada para ruta: ${inputPath}`);
   return fullPath;
 };
 
@@ -217,15 +211,15 @@ const createOOH = async (req, res) => {
     const { 
       brand_id, campaign_id, ooh_type_id, provider_id, city_id,  // ✅ IDs
       direccion, latitud, longitud, fechaInicio, fechaFin,       // campos comunes
-      checked, estado_id                                           // ✅ NUEVO: estado_id
+      checked, estado_id, review_required, review_reason         // ✅ NUEVO: review_required, review_reason
     } = req.body;
     
     // 🔄 COMPATIBILIDAD: Si vienen nombres (backend antiguo), rechazar
     const { marca, categoria, proveedor, tipoOOH, campana, ciudad, region } = req.body;
     
     if (marca || categoria || proveedor || tipoOOH || campana || ciudad || region) {
-      console.log(`⚠️ [${operationType}] ADVERTENCIA: Se recibieron campos con nombres en lugar de IDs`);
-      console.log(`📝 [${operationType}] Campos recibidos (nombres - DEPRECATED):`, { marca, categoria, proveedor, tipoOOH, campana, ciudad, region });
+      // console.log(`⚠️ [${operationType}] ADVERTENCIA: Se recibieron campos con nombres en lugar de IDs`);
+      // console.log(`📝 [${operationType}] Campos recibidos (nombres - DEPRECATED):`, { marca, categoria, proveedor, tipoOOH, campana, ciudad, region });
       return res.status(400).json({
         error: 'Arquitectura actualizada: Enviar IDs en lugar de nombres',
         requiredFields: {
@@ -247,22 +241,22 @@ const createOOH = async (req, res) => {
     }
 
     // ✅ Validar que se recibieron los IDs requeridos
-    console.log(`📋 [${operationType}] Datos recibidos (IDs):`, { existingId, brand_id, campaign_id, ooh_type_id, provider_id, city_id, direccion, latitud, longitud });
+    // console.log(`📋 [${operationType}] Datos recibidos (IDs):`, { existingId, brand_id, campaign_id, ooh_type_id, provider_id, city_id, direccion, latitud, longitud });
 
     // Validación mejorada: convertir string "undefined" a undefined
     const ooh_type_id_clean = ooh_type_id === 'undefined' || ooh_type_id === '' ? undefined : ooh_type_id;
     
     if (!brand_id || !campaign_id || !ooh_type_id_clean || !provider_id || !city_id || !direccion || !latitud || !longitud || !fechaInicio) {
-      console.log(`❌ [${operationType}] Error: Faltan IDs obligatorios`);
-      console.log(`   brand_id: ${brand_id}`);
-      console.log(`   campaign_id: ${campaign_id}`);
-      console.log(`   ooh_type_id: ${ooh_type_id} (clean: ${ooh_type_id_clean})`);
-      console.log(`   provider_id: ${provider_id}`);
-      console.log(`   city_id: ${city_id}`);
-      console.log(`   direccion: ${direccion}`);
-      console.log(`   latitud: ${latitud}`);
-      console.log(`   longitud: ${longitud}`);
-      console.log(`   fechaInicio: ${fechaInicio}`);
+      // console.log(`❌ [${operationType}] Error: Faltan IDs obligatorios`);
+      // console.log(`   brand_id: ${brand_id}`);
+      // console.log(`   campaign_id: ${campaign_id}`);
+      // console.log(`   ooh_type_id: ${ooh_type_id} (clean: ${ooh_type_id_clean})`);
+      // console.log(`   provider_id: ${provider_id}`);
+      // console.log(`   city_id: ${city_id}`);
+      // console.log(`   direccion: ${direccion}`);
+      // console.log(`   latitud: ${latitud}`);
+      // console.log(`   longitud: ${longitud}`);
+      // console.log(`   fechaInicio: ${fechaInicio}`);
       return res.status(400).json({
         error: 'Faltan campos obligatorios',
         required: ['brand_id', 'campaign_id', 'ooh_type_id', 'provider_id', 'city_id', 'direccion', 'latitud', 'longitud', 'fechaInicio'],
@@ -275,7 +269,7 @@ const createOOH = async (req, res) => {
     const ooh_type_id_final = parseInt(ooh_type_id_clean, 10);
 
     // ✅ Obtener datos relacionados desde BD usando los IDs
-    console.log(`\n📚 [${operationType} - BD LOOKUP] Obteniendo datos relacionados por IDs...`);
+    // console.log(`\n📚 [${operationType} - BD LOOKUP] Obteniendo datos relacionados por IDs...`);
     
     const brand = await dbService.getBrandById(brand_id);
     const campaign = await dbService.getCampaignById(campaign_id);
@@ -289,13 +283,13 @@ const createOOH = async (req, res) => {
     if (estado_id) {
       state = dbService.getOOHStateById(estado_id_final);
       if (!state) {
-        console.log(`⚠️ Estado con ID ${estado_id_final} no encontrado, usando ACTIVO por defecto`);
+        // console.log(`⚠️ Estado con ID ${estado_id_final} no encontrado, usando ACTIVO por defecto`);
         estado_id_final = 1;
         state = dbService.getOOHStateById(1);
       }
     } else {
       state = dbService.getOOHStateById(1);
-      console.log(`ℹ️ No se especificó estado_id, usando ACTIVO por defecto`);
+      // console.log(`ℹ️ No se especificó estado_id, usando ACTIVO por defecto`);
     }
 
     // ✅ Validar que todos los IDs existan
@@ -315,45 +309,45 @@ const createOOH = async (req, res) => {
       return res.status(400).json({ error: `Ciudad no encontrada con ID: ${city_id}` });
     }
 
-    console.log('✅ Todos los IDs validados en BD');
-    console.log(`   • Brand: ${brand.nombre} (id=${brand_id})`);
-    console.log(`   • Campaign: ${campaign.nombre} (id=${campaign_id})`);
-    console.log(`   • Type: ${oohType.nombre} (id=${ooh_type_id_final})`);
-    console.log(`   • Provider: ${provider.nombre} (id=${provider_id})`);
-    console.log(`   • City: ${city.nombre} (id=${city_id})`);
-    console.log(`   • Estado: ${state ? state.nombre : 'ACTIVO'} (id=${estado_id_final})`);
+    // console.log('✅ Todos los IDs validados en BD');
+    // console.log(`   • Brand: ${brand.nombre} (id=${brand_id})`);
+    // console.log(`   • Campaign: ${campaign.nombre} (id=${campaign_id})`);
+    // console.log(`   • Type: ${oohType.nombre} (id=${ooh_type_id_final})`);
+    // console.log(`   • Provider: ${provider.nombre} (id=${provider_id})`);
+    // console.log(`   • City: ${city.nombre} (id=${city_id})`);
+    // console.log(`   • Estado: ${state ? state.nombre : 'ACTIVO'} (id=${estado_id_final})`);
 
     // ✅ AUTO-COMPUTAR: Derivar category_id desde brand.category_id
     const category_id = brand.category_id;
-    console.log(`✅ AUTO-COMPUTAR category_id=${category_id} desde brand.category_id`);
+    // console.log(`✅ AUTO-COMPUTAR category_id=${category_id} desde brand.category_id`);
 
     // ✅ AUTO-COMPUTAR: Derivar region_id desde city.region_id
     const region_id = city.region_id;
-    console.log(`✅ AUTO-COMPUTAR region_id=${region_id} desde city.region_id`);
+    // console.log(`✅ AUTO-COMPUTAR region_id=${region_id} desde city.region_id`);
 
     // Normalizar fechas a formato ISO (yyyy-MM-dd)
     const FECHA_INICIO = normalizeDateToISO(fechaInicio);
     const FECHA_FIN = normalizeDateToISO(fechaFin);
 
-    console.log('📅 Fechas normalizadas:', { FECHA_INICIO, FECHA_FIN });
-    console.log('📸 Archivos recibidos:', req.files ? req.files.length : 0);
+    // console.log('📅 Fechas normalizadas:', { FECHA_INICIO, FECHA_FIN });
+    // console.log('📸 Archivos recibidos:', req.files ? req.files.length : 0);
 
     // 🌍 VALIDACIÓN GEOGRÁFICA: Verificar que las coordenadas correspondan a la ciudad
-    console.log('\n📍 [VALIDACIÓN GEO] Verificando que coordenadas correspondan a la ciudad...');
+    // console.log('\n📍 [VALIDACIÓN GEO] Verificando que coordenadas correspondan a la ciudad...');
     const geoValidation = await geoValidationService.validarCoordenadasPorCiudad(city.nombre, latitud, longitud);
     
     if (!geoValidation.valido) {
-      console.log(`❌ [VALIDACIÓN GEO] ${geoValidation.mensaje}`);
+      // console.log(`❌ [VALIDACIÓN GEO] ${geoValidation.mensaje}`);
       return res.status(400).json({
         error: geoValidation.mensaje,
         detalles: 'Las coordenadas (latitud, longitud) deben corresponder a la ciudad indicada. Verifica que no haya confusión de ubicaciones.'
       });
     }
-    console.log(`✅ [VALIDACIÓN GEO] ${geoValidation.mensaje}`);
+    // console.log(`✅ [VALIDACIÓN GEO] ${geoValidation.mensaje}`);
 
     // Si es una actualización (tiene ID), las imágenes son opcionales
     const isUpdate = !!existingId;
-    console.log(`🔄 ¿Es actualización? ${isUpdate} (existingId=${existingId})`);
+    // console.log(`🔄 ¿Es actualización? ${isUpdate} (existingId=${existingId})`);
     
     const imageIndexes = req.body.imageIndexes
       ? String(req.body.imageIndexes)
@@ -365,16 +359,16 @@ const createOOH = async (req, res) => {
     // Validar que haya al menos 1 imagen para registros nuevos SOLO si NO viene de Excel
     const isFromExcel = req.body.fromExcel === 'true' || req.body.fromExcel === true;
     if (!isUpdate && !isFromExcel && (!req.files || req.files.length === 0)) {
-      console.log('❌ Error: No se recibió ninguna imagen para registro nuevo');
+      // console.log('❌ Error: No se recibió ninguna imagen para registro nuevo');
       return res.status(400).json({
         error: '⚠️ Debes subir al menos 1 imagen para un nuevo registro. Se recomienda subir 3 imágenes.'
       });
     }
     if (isFromExcel) {
-      console.log('📊 [EXCEL] Registro sin imágenes permitido (importación desde Excel)');
+      // console.log('📊 [EXCEL] Registro sin imágenes permitido (importación desde Excel)');
     }
 
-    console.log('🔍 Buscando registro existente para evitar duplicados...');
+    // console.log('🔍 Buscando registro existente para evitar duplicados...');
 
     let existing = null;
     if (existingId) {
@@ -387,14 +381,14 @@ const createOOH = async (req, res) => {
     const existingCSV = existing ? { lineIndex: 0, values: existing } : { lineIndex: -1, values: null };
 
     if (existingCSV.values) {
-      console.log('♻️ [ANTI-DUPLICADO] Registro YA existe en BD:', {
-        id: existingCSV.values.id,
-        marca: existingCSV.values.marca,
-        direccion: existingCSV.values.direccion,
-        fecha: existingCSV.values.fecha_inicio
-      });
+      // console.log('♻️ [ANTI-DUPLICADO] Registro YA existe en BD:', {
+      //   id: existingCSV.values.id,
+      //   marca: existingCSV.values.marca,
+      //   direccion: existingCSV.values.direccion,
+      //   fecha: existingCSV.values.fecha_inicio
+      // });
     } else {
-      console.log('✅ [ANTI-DUPLICADO] Registro nuevo, no hay duplicados');
+      // console.log('✅ [ANTI-DUPLICADO] Registro nuevo, no hay duplicados');
     }
 
     let id;
@@ -417,6 +411,8 @@ const createOOH = async (req, res) => {
         console.log('📷 Manteniendo imágenes existentes (sin cambios)');
       } else {
         console.log('📤 Actualizando imágenes (reemplazo parcial)...');
+        console.log('📸 Archivos recibidos:', req.files.length);
+        console.log('📍 Índices de imágenes:', imageIndexes);
         
         // Decidir donde subir las imágenes
         let uploadedUrls;
@@ -473,14 +469,14 @@ const createOOH = async (req, res) => {
         uploadedUrls.forEach((url, idx) => {
           const targetIndex = imageIndexes[idx] !== undefined ? imageIndexes[idx] : idx;
           imageUrls[targetIndex] = url;
-          console.log(`✅ Slot ${targetIndex + 1} actualizado (URL estable si existía)`);
+          console.log(`✅ Slot ${targetIndex + 1} actualizado: ${url.substring(0, 80)}...`);
         });
       }
 
     } else {
       // Si no se encontró registro pero se envió un ID, es un error
       if (existingId) {
-        console.log('❌ Error: ID proporcionado no encontrado en la base de datos');
+        // console.log('❌ Error: ID proporcionado no encontrado en la base de datos');
         return res.status(404).json({
           error: 'Registro no encontrado con el ID proporcionado'
         });
@@ -491,6 +487,7 @@ const createOOH = async (req, res) => {
       console.log(`🆕 Creando nuevo registro con ID: ${id}`);
       
       console.log('📤 Subiendo imágenes...');
+      console.log('📸 Archivos recibidos:', req.files ? req.files.length : 0);
       
       // Decidir donde subir las imágenes
       if (USE_GCS) {
@@ -507,7 +504,7 @@ const createOOH = async (req, res) => {
       }
     }
     
-    console.log('✅ Imágenes obtenidas:', imageUrls);
+    console.log('✅ Imágenes obtenidas:', imageUrls.length);
     console.log('📊 Imagen 0:', imageUrls[0] ? imageUrls[0].substring(0, 80) : 'vacía');
     console.log('📊 Imagen 1:', imageUrls[1] ? imageUrls[1].substring(0, 80) : 'vacía');
     console.log('📊 Imagen 2:', imageUrls[2] ? imageUrls[2].substring(0, 80) : 'vacía');
@@ -527,6 +524,8 @@ const createOOH = async (req, res) => {
       category_id: category_id,          // ✅ AUTO-COMPUTADO
       region_id: region_id,               // ✅ AUTO-COMPUTADO
       estado_id: estado_id_final,         // ✅ NUEVO: estado_id
+      review_required: review_required ? 1 : 0,  // ✅ NUEVO: review_required
+      review_reason: review_reason || null,      // ✅ NUEVO: review_reason
       // Datos locales para búsqueda rápida (denormalizados)
       marca: brand.nombre,
       campana: campaign.nombre,
@@ -555,19 +554,19 @@ const createOOH = async (req, res) => {
       // Si BigQuery está activo y en modo realtime, actualizar también allí
       if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
         try {
-          console.log('📊 [UPDATE - BigQuery] Actualizando registro en BigQuery...');
+          // console.log('📊 [UPDATE - BigQuery] Actualizando registro en BigQuery...');
           const bqRecord = await dbService.getRecordById(id);
           if (bqRecord) {
             await bigQueryService.updateOOHRecord(buildBigQueryPayload(bqRecord));
-            console.log('✅ [UPDATE - BigQuery] Registro actualizado exitosamente');
+            // console.log('✅ [UPDATE - BigQuery] Registro actualizado exitosamente');
           } else {
-            console.warn('⚠️ No se pudo obtener el registro de la BD para BigQuery');
+            // console.warn('⚠️ No se pudo obtener el registro de la BD para BigQuery');
           }
         } catch (bqError) {
           console.error('⚠️ Error al actualizar en BigQuery (continuando):', bqError.message);
         }
       } else if (USE_BIGQUERY && !USE_BIGQUERY_REALTIME) {
-        console.log('⏭️  [UPDATE - BigQuery] Realtime desactivado; se sincronizará por endpoint/cron');
+        // console.log('⏭️  [UPDATE - BigQuery] Realtime desactivado; se sincronizará por endpoint/cron');
       }
       
       console.log(`\n${'='.repeat(60)}`);
@@ -594,19 +593,19 @@ const createOOH = async (req, res) => {
       // Si BigQuery está activo y en modo realtime, guardar también allí
       if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
         try {
-          console.log('📊 [CREATE - BigQuery] Guardando registro en BigQuery...');
+          // console.log('📊 [CREATE - BigQuery] Guardando registro en BigQuery...');
           const bqRecord = await dbService.getRecordById(id);
           if (bqRecord) {
             await bigQueryService.insertOOHRecord(buildBigQueryPayload(bqRecord));
-            console.log('✅ [CREATE - BigQuery] Registro guardado exitosamente');
+            // console.log('✅ [CREATE - BigQuery] Registro guardado exitosamente');
           } else {
-            console.warn('⚠️ No se pudo obtener el registro de la BD para BigQuery');
+            // console.warn('⚠️ No se pudo obtener el registro de la BD para BigQuery');
           }
         } catch (bqError) {
           console.error('⚠️ Error al guardar en BigQuery (continuando):', bqError.message);
         }
       } else if (USE_BIGQUERY && !USE_BIGQUERY_REALTIME) {
-        console.log('⏭️  [CREATE - BigQuery] Realtime desactivado; se sincronizará por endpoint/cron');
+        // console.log('⏭️  [CREATE - BigQuery] Realtime desactivado; se sincronizará por endpoint/cron');
       }
       
       console.log(`\n${'='.repeat(60)}`);
@@ -637,24 +636,24 @@ const createOOH = async (req, res) => {
 };
 
 const getAllOOH = async (req, res) => {
-  console.log('\n🔵 [GET ALL OOH] Obteniendo registros...');
+  // console.log('\n🔵 [GET ALL OOH] Obteniendo registros...');
   try {
     // Paginación: page (default 1), limit (default 20)
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     
-    console.log(`📄 Paginación: page=${page}, limit=${limit}, offset=${offset}`);
+    // console.log(`📄 Paginación: page=${page}, limit=${limit}, offset=${offset}`);
     
     // Filtros opcionales
     const filters = {};
     if (req.query.mes) {
       filters.mes = req.query.mes;
-      console.log(`📅 Filtro mes: ${req.query.mes}`);
+      // console.log(`📅 Filtro mes: ${req.query.mes}`);
     }
     if (req.query.ano) {
       filters.ano = req.query.ano;
-      console.log(`📅 Filtro año: ${req.query.ano}`);
+      // console.log(`📅 Filtro año: ${req.query.ano}`);
     }
     
     // Leer todos los registros de la BD con filtros
@@ -664,11 +663,11 @@ const getAllOOH = async (req, res) => {
     // Aplicar paginación en memoria
     const records = allRecords.slice(offset, offset + limit);
     
-    console.log(`✅ Total registros: ${total}, enviando: ${records.length} (página ${page})`);
+    // console.log(`✅ Total registros: ${total}, enviando: ${records.length} (página ${page})`);
     
     if (records.length > 0) {
-      console.log('📸 Ejemplo imagen_1:', records[0].imagen_1);
-      console.log('📸 Ejemplo imagen_2:', records[0].imagen_2);
+      // console.log('📸 Ejemplo imagen_1:', records[0].imagen_1);
+      // console.log('📸 Ejemplo imagen_2:', records[0].imagen_2);
     }
     
     res.json({
@@ -679,7 +678,7 @@ const getAllOOH = async (req, res) => {
         limit,
         total,
         totalPages: Math.ceil(total / limit),
-        hasMore: offset + records.length < total
+        hasMore: offset < total && records.length > 0
       }
     });
   } catch (error) {
@@ -726,7 +725,7 @@ const generateReport = async (req, res) => {
     
     // Obtener registros filtrados por VALLA
     const allRecords = await dbService.getAllRecords();
-    console.log(`📋 Total registros en BD: ${allRecords.length}`);
+    // console.log(`📋 Total registros en BD: ${allRecords.length}`);
 
     // Filtrar por VALLA y mes
     const records = allRecords
@@ -734,7 +733,7 @@ const generateReport = async (req, res) => {
         const tipoOOH = String(record.tipo_ooh || '').trim().toUpperCase();
         const match = tipoOOH === 'VALLA';
         if (!match) {
-          console.log(`❌ Registro rechazado: tipo_ooh="${record.tipo_ooh}" (no es VALLA)`);
+          // console.log(`❌ Registro rechazado: tipo_ooh="${record.tipo_ooh}" (no es VALLA)`);
         }
         return match;
       })
@@ -773,11 +772,11 @@ const generateReport = async (req, res) => {
       ? records.filter(r => matchesMonth(r.fechaInicio, monthParam) || matchesMonth(r.fechaFin, monthParam))
       : records;
 
-    console.log(`📊 Registros totales VALLA: ${records.length}`);
-    console.log(`📊 Registros filtrados para ${monthParam}: ${filtered.length}`);
+    // console.log(`📊 Registros totales VALLA: ${records.length}`);
+    // console.log(`📊 Registros filtrados para ${monthParam}: ${filtered.length}`);
     if (filtered.length > 0) {
-      console.log(`   Ejemplo fecha inicio: ${filtered[0].fechaInicio}`);
-      console.log(`   Ejemplo fecha fin: ${filtered[0].fechaFin}`);
+      // console.log(`   Ejemplo fecha inicio: ${filtered[0].fechaInicio}`);
+      // console.log(`   Ejemplo fecha fin: ${filtered[0].fechaFin}`);
     }
 
     if (monthParam && filtered.length === 0) {
@@ -788,8 +787,8 @@ const generateReport = async (req, res) => {
     }
 
     const total = filtered.length;
-    console.log(`📊 Generando PPT con ${total} registros de VAYA${monthParam ? ` para ${monthParam}` : ''}`);
-    console.log(`   Método: ${useBase ? 'Archivo BASE + Python' : 'PptxGenJS desde cero'}`);
+    // console.log(`📊 Generando PPT con ${total} registros de VAYA${monthParam ? ` para ${monthParam}` : ''}`);
+    // console.log(`   Método: ${useBase ? 'Archivo BASE + Python' : 'PptxGenJS desde cero'}`);
 
     // OPCIÓN 1: Usar archivo base con Python (requiere python-pptx instalado)
     if (useBase) {
@@ -801,7 +800,7 @@ const generateReport = async (req, res) => {
       
       // Verificar que existe el archivo base
       if (!fs.existsSync(basePPTPath)) {
-        console.warn('⚠️ Archivo base no encontrado, usando PptxGenJS...');
+        // console.warn('⚠️ Archivo base no encontrado, usando PptxGenJS...');
       } else {
         // Preparar datos para Python
         const pyData = {
@@ -822,7 +821,7 @@ const generateReport = async (req, res) => {
           
           python.stdout.on('data', (data) => {
             stdout += data.toString();
-            console.log(data.toString().trim());
+            // console.log(data.toString().trim());
           });
           
           python.stderr.on('data', (data) => {
@@ -1020,7 +1019,7 @@ const generateReport = async (req, res) => {
         align: 'left'
       });
       
-      console.log(`✅ Slide ${idx + 1}: ${record.direccion} (${record.ciudad})`);
+      // console.log(`✅ Slide ${idx + 1}: ${record.direccion} (${record.ciudad})`);
     });
 
     const buffer = await pptx.write('nodebuffer');
@@ -1192,7 +1191,7 @@ const validateCityName = async (req, res) => {
     const validation = dbService.validateCityName(ciudad);
     
     if (!validation.isValid) {
-      console.log(`⚠️ [VALIDACIÓN CIUDAD] Duplicado detectado: ${validation.message}`);
+      // console.log(`⚠️ [VALIDACIÓN CIUDAD] Duplicado detectado: ${validation.message}`);
       
       return res.status(400).json({
         success: false,
@@ -1210,7 +1209,7 @@ const validateCityName = async (req, res) => {
     }
 
     // Si es válido, devolver confirmación
-    console.log(`✅ [VALIDACIÓN CIUDAD] ${validation.message}`);
+    // console.log(`✅ [VALIDACIÓN CIUDAD] ${validation.message}`);
     
     return res.status(200).json({
       success: true,
@@ -1339,21 +1338,21 @@ const initializeApp = (req, res) => {
     const sizeInKB = (sizeInBytes / 1024).toFixed(2);
     const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
     
-    console.log('📊 TAMAÑO DE RESPUESTA /initialize:');
-    console.log(`   Bytes: ${sizeInBytes}`);
-    console.log(`   KB: ${sizeInKB}`);
-    console.log(`   MB: ${sizeInMB}`);
-    console.log(`   Breakdown:`);
-    console.log(`   - Brands (${brands.length}): ${(JSON.stringify(brands).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Campaigns (${campaigns.length}): ${(JSON.stringify(campaigns).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Categories (${categories.length}): ${(JSON.stringify(categories).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Advertisers (${advertisers.length}): ${(JSON.stringify(advertisers).length / 1024).toFixed(2)} KB`);
-    console.log(`   - OOH Types (${oohTypes.length}): ${(JSON.stringify(oohTypes).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Cities (${cities.length}): ${(JSON.stringify(cities).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Addresses (${addresses.length}): ${(JSON.stringify(addresses).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Providers (${providers.length}): ${(JSON.stringify(providers).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Regions (${regions.length}): ${(JSON.stringify(regions).length / 1024).toFixed(2)} KB`);
-    console.log(`   - Records (${records.length}): ${(JSON.stringify(records).length / 1024).toFixed(2)} KB`);
+    // console.log('📊 TAMAÑO DE RESPUESTA /initialize:');
+    // console.log(`   Bytes: ${sizeInBytes}`);
+    // console.log(`   KB: ${sizeInKB}`);
+    // console.log(`   MB: ${sizeInMB}`);
+    // console.log(`   Breakdown:`);
+    // console.log(`   - Brands (${brands.length}): ${(JSON.stringify(brands).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Campaigns (${campaigns.length}): ${(JSON.stringify(campaigns).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Categories (${categories.length}): ${(JSON.stringify(categories).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Advertisers (${advertisers.length}): ${(JSON.stringify(advertisers).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - OOH Types (${oohTypes.length}): ${(JSON.stringify(oohTypes).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Cities (${cities.length}): ${(JSON.stringify(cities).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Addresses (${addresses.length}): ${(JSON.stringify(addresses).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Providers (${providers.length}): ${(JSON.stringify(providers).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Regions (${regions.length}): ${(JSON.stringify(regions).length / 1024).toFixed(2)} KB`);
+    // console.log(`   - Records (${records.length}): ${(JSON.stringify(records).length / 1024).toFixed(2)} KB`);
     
     res.json(responseData);
   } catch (error) {
@@ -1387,7 +1386,7 @@ const createCity = async (req, res) => {
     // Validar si la ciudad ya existe
     const validation = dbService.validateCityName(CIUDAD);
     if (!validation.isValid) {
-      console.log(`⚠️ [CREATE CITY] Duplicado detectado: ${validation.message}`);
+      // console.log(`⚠️ [CREATE CITY] Duplicado detectado: ${validation.message}`);
       return res.status(400).json({
         success: false,
         valid: false,
@@ -1403,7 +1402,7 @@ const createCity = async (req, res) => {
     // Crear la ciudad en BD
     const newCity = dbService.addCity(CIUDAD, REGION);
     
-    console.log(`✅ [CREATE CITY] Ciudad creada: ${CIUDAD} en región ${REGION}`);
+    // console.log(`✅ [CREATE CITY] Ciudad creada: ${CIUDAD} en región ${REGION}`);
     return res.status(201).json({
       success: true,
       valid: true,
@@ -1539,21 +1538,21 @@ const deleteOOH = async (req, res) => {
       return res.status(400).json({ error: 'ID del registro requerido' });
     }
 
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🗑️  [DELETE OOH] Iniciando eliminación del registro: ${id}`);
-    console.log(`${'='.repeat(60)}\n`);
+    // console.log(`\n${'='.repeat(60)}`);
+    // console.log(`🗑️  [DELETE OOH] Iniciando eliminación del registro: ${id}`);
+    // console.log(`${'='.repeat(60)}\n`);
 
     // Obtener información del registro antes de eliminarlo (para logs)
     const existing = await dbService.findExistingById(id);
     if (existing) {
-      console.log(`📋 Registro encontrado en BD Local:`);
-      console.log(`   • Marca: ${existing.marca}`);
-      console.log(`   • Campaña: ${existing.campana}`);
-      console.log(`   • Ciudad: ${existing.ciudad}`);
+      // console.log(`📋 Registro encontrado en BD Local:`);
+      // console.log(`   • Marca: ${existing.marca}`);
+      // console.log(`   • Campaña: ${existing.campana}`);
+      // console.log(`   • Ciudad: ${existing.ciudad}`);
     }
 
     // 1️⃣ ELIMINAR DE BD LOCAL (SQLite)
-    console.log(`\n💾 [PASO 1] Eliminando de SQLite (BD Local)...`);
+    // console.log(`\n💾 [PASO 1] Eliminando de SQLite (BD Local)...`);
     const result = dbService.deleteOOHRecord(id);
 
     if (!result.success) {
@@ -1563,54 +1562,54 @@ const deleteOOH = async (req, res) => {
         success: false 
       });
     }
-    console.log(`✅ Registro eliminado de SQLite`);
+    // console.log(`✅ Registro eliminado de SQLite`);
 
     // 2️⃣ ELIMINAR DE BIG QUERY
     if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
-      console.log(`\n📊 [PASO 2] Eliminando de BigQuery...`);
+      // console.log(`\n📊 [PASO 2] Eliminando de BigQuery...`);
       try {
         await bigQueryService.deleteOOHRecord(id);
-        console.log(`✅ Registro eliminado de BigQuery`);
+        // console.log(`✅ Registro eliminado de BigQuery`);
       } catch (bqError) {
         console.error('❌ Error eliminando registro de BigQuery:', bqError.message || bqError);
         // No retornar error, continuar con la eliminación
       }
     } else if (USE_BIGQUERY && !USE_BIGQUERY_REALTIME) {
-      console.log(`⏭️  [PASO 2] Realtime desactivado; se sincronizará por endpoint/cron`);
+      // console.log(`⏭️  [PASO 2] Realtime desactivado; se sincronizará por endpoint/cron`);
     } else {
-      console.log(`⏭️  [PASO 2] BigQuery no está activo - omitido`);
+      // console.log(`⏭️  [PASO 2] BigQuery no está activo - omitido`);
     }
 
     // 3️⃣ ELIMINAR IMÁGENES DE GCS
     if (USE_GCS) {
-      console.log(`\n☁️  [PASO 3] Eliminando imágenes de Google Cloud Storage...`);
+      // console.log(`\n☁️  [PASO 3] Eliminando imágenes de Google Cloud Storage...`);
       try {
         const recordSource = existing;
         const brandName = recordSource && (recordSource.marca || recordSource.brand || recordSource.nombre);
 
         if (brandName) {
-          console.log(`   Eliminando carpeta: ${brandName}/${id}`);
+          // console.log(`   Eliminando carpeta: ${brandName}/${id}`);
           await gcsService.deleteRecordFolder(brandName, id);
-          console.log(`✅ Carpeta de imágenes eliminada de GCS`);
+          // console.log(`✅ Carpeta de imágenes eliminada de GCS`);
         } else {
-          console.warn('⚠️ No se encontró marca para eliminar carpeta en GCS');
+          // console.warn('⚠️ No se encontró marca para eliminar carpeta en GCS');
         }
       } catch (gcsError) {
         console.error('⚠️ Error eliminando archivos en GCS:', gcsError.message || gcsError);
         // No retornar error, la eliminación principal ya fue exitosa
       }
     } else {
-      console.log(`⏭️  [PASO 3] GCS no está activo - omitido`);
+      // console.log(`⏭️  [PASO 3] GCS no está activo - omitido`);
     }
 
     // RESUMEN FINAL
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`✅ ELIMINACIÓN COMPLETADA`);
-    console.log(`   ID Registro: ${id}`);
-    console.log(`   SQLite: ✓ Eliminado`);
-    console.log(`   BigQuery: ${USE_BIGQUERY ? (USE_BIGQUERY_REALTIME ? '✓ Eliminado' : '⏭️ Pendiente sync') : '× No activado'}`);
-    console.log(`   GCS: ${USE_GCS ? '✓ Eliminado' : '× No activado'}`);
-    console.log(`${'='.repeat(60)}\n`);
+    // console.log(`\n${'='.repeat(60)}`);
+    // console.log(`✅ ELIMINACIÓN COMPLETADA`);
+    // console.log(`   ID Registro: ${id}`);
+    // console.log(`   SQLite: ✓ Eliminado`);
+    // console.log(`   BigQuery: ${USE_BIGQUERY ? (USE_BIGQUERY_REALTIME ? '✓ Eliminado' : '⏭️ Pendiente sync') : '× No activado'}`);
+    // console.log(`   GCS: ${USE_GCS ? '✓ Eliminado' : '× No activado'}`);
+    // console.log(`${'='.repeat(60)}\n`);
     
     return res.status(200).json({
       success: true,
@@ -1642,12 +1641,12 @@ const syncBigQuery = async (req, res) => {
       });
     }
 
-    console.log(`\n${'='.repeat(60)}`);
-    console.log('🔄 [BIGQUERY SYNC] Iniciando sincronización completa desde SQLite...');
-    console.log(`${'='.repeat(60)}\n`);
+    // console.log(`\n${'='.repeat(60)}`);
+    // console.log('🔄 [BIGQUERY SYNC] Iniciando sincronización completa desde SQLite...');
+    // console.log(`${'='.repeat(60)}\n`);
 
     const allRecords = await dbService.getAllRecords({});
-    console.log(`📦 Registros encontrados en SQLite: ${allRecords.length}`);
+    // console.log(`📦 Registros encontrados en SQLite: ${allRecords.length}`);
 
     const payloads = [];
     for (const record of allRecords) {
@@ -1655,15 +1654,15 @@ const syncBigQuery = async (req, res) => {
       if (full) {
         payloads.push(buildBigQueryPayload(full));
       } else {
-        console.warn(`⚠️ No se pudo cargar registro completo para ID: ${record.id}`);
+        // console.warn(`⚠️ No se pudo cargar registro completo para ID: ${record.id}`);
       }
     }
 
     const result = await bigQueryService.rebuildTableWithRecords(payloads);
 
-    console.log(`\n✅ [BIGQUERY SYNC] Sincronización completada`);
-    console.log(`   Registros enviados: ${payloads.length}`);
-    console.log(`   Registros insertados: ${result.inserted || 0}`);
+    // console.log(`\n✅ [BIGQUERY SYNC] Sincronización completada`);
+    // console.log(`   Registros enviados: ${payloads.length}`);
+    // console.log(`   Registros insertados: ${result.inserted || 0}`);
 
     return res.status(200).json({
       success: true,
@@ -1700,9 +1699,9 @@ const syncRecordToBigQuery = async (req, res) => {
       });
     }
 
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`📊 [BIGQUERY SYNC] Sincronizando registro: ${id}`);
-    console.log(`${'='.repeat(60)}\n`);
+    // console.log(`\n${'='.repeat(60)}`);
+    // console.log(`📊 [BIGQUERY SYNC] Sincronizando registro: ${id}`);
+    // console.log(`${'='.repeat(60)}\n`);
 
     // Obtener registro de BD local
     const record = await dbService.getRecordById(id);
@@ -1731,12 +1730,12 @@ const syncRecordToBigQuery = async (req, res) => {
     updateStmt.free();
     dbService.saveDB();
 
-    console.log(`✅ [BIGQUERY SYNC] Registro sincronizado exitosamente`);
-    console.log(`   ID: ${id}`);
-    console.log(`   Marca: ${record.marca || 'N/A'}`);
-    console.log(`   Estado: SYNCED`);
-    console.log(`   Timestamp: ${new Date().toISOString()}`);
-    console.log(`${'='.repeat(60)}\n`);
+    // console.log(`✅ [BIGQUERY SYNC] Registro sincronizado exitosamente`);
+    // console.log(`   ID: ${id}`);
+    // console.log(`   Marca: ${record.marca || 'N/A'}`);
+    // console.log(`   Estado: SYNCED`);
+    // console.log(`   Timestamp: ${new Date().toISOString()}`);
+    // console.log(`${'='.repeat(60)}\n`);
 
     res.status(200).json({
       success: true,
@@ -1777,8 +1776,8 @@ const updateChecked = async (req, res) => {
       });
     }
 
-    console.log(`\n🔄 [UPDATE CHECKED] Actualizando estado del registro: ${id}`);
-    console.log(`   Nuevo estado: ${checked ? 'CHEQUEADO ✓' : 'SIN CHEQUEAR ○'}`);
+    // console.log(`\n🔄 [UPDATE CHECKED] Actualizando estado del registro: ${id}`);
+    // console.log(`   Nuevo estado: ${checked ? 'CHEQUEADO ✓' : 'SIN CHEQUEAR ○'}`);
 
     // Obtener registro actual
     const record = await dbService.getRecordById(id);
@@ -1801,16 +1800,16 @@ const updateChecked = async (req, res) => {
     updateStmt.free();
     dbService.saveDB();
 
-    console.log(`✅ [BD LOCAL] Registro actualizado`);
+    // console.log(`✅ [BD LOCAL] Registro actualizado`);
 
     // Si BigQuery está activo y en realtime, actualizar allí también
     if (USE_BIGQUERY && USE_BIGQUERY_REALTIME) {
       try {
-        console.log('📊 [BIGQUERY] Actualizando checked...');
+        // console.log('📊 [BIGQUERY] Actualizando checked...');
         const bqRecord = await dbService.getRecordById(id);
         if (bqRecord) {
           await bigQueryService.updateOOHRecord(buildBigQueryPayload(bqRecord));
-          console.log('✅ [BIGQUERY] Actualizado exitosamente');
+          // console.log('✅ [BIGQUERY] Actualizado exitosamente');
         }
       } catch (bqError) {
         console.error('⚠️ Error actualizando BigQuery:', bqError.message);
@@ -1818,7 +1817,7 @@ const updateChecked = async (req, res) => {
       }
     }
 
-    console.log(`${'='.repeat(60)}\n`);
+    // console.log(`${'='.repeat(60)}\n`);
 
     res.status(200).json({
       success: true,
@@ -1920,7 +1919,7 @@ const createAddress = async (req, res) => {
   try {
     const { city_id, descripcion, latitud, longitud } = req.body;
     
-    console.log('📍 [CREATE ADDRESS] Creando dirección:', { city_id, descripcion, latitud, longitud });
+    // console.log('📍 [CREATE ADDRESS] Creando dirección:', { city_id, descripcion, latitud, longitud });
     
     if (!city_id || !descripcion || !latitud || !longitud) {
       return res.status(400).json({ 
@@ -1951,7 +1950,7 @@ const createAddress = async (req, res) => {
       const existingAddress = findExactStmt.getAsObject();
       findExactStmt.free();
 
-      console.log('✅ [CREATE ADDRESS] Dirección existente (coincidencia exacta):', existingAddress);
+      // console.log('✅ [CREATE ADDRESS] Dirección existente (coincidencia exacta):', existingAddress);
       return res.status(200).json({
         success: true,
         message: 'Dirección existente encontrada',
@@ -1987,10 +1986,10 @@ const createAddress = async (req, res) => {
       const similarAddress = findSimilarStmt.getAsObject();
       findSimilarStmt.free();
       
-      console.log('🔍 [CREATE ADDRESS] Dirección SIMILAR encontrada (mismas coordenadas ±100m):');
-      console.log(`   Buscada: "${normalizedDescripcion}" (${latFloat}, ${lngFloat})`);
-      console.log(`   Existente: "${similarAddress.descripcion}" (${similarAddress.latitud}, ${similarAddress.longitud})`);
-      console.log('   ✅ Reutilizando dirección existente para evitar duplicados');
+      // console.log('🔍 [CREATE ADDRESS] Dirección SIMILAR encontrada (mismas coordenadas ±100m):');
+      // console.log(`   Buscada: "${normalizedDescripcion}" (${latFloat}, ${lngFloat})`);
+      // console.log(`   Existente: "${similarAddress.descripcion}" (${similarAddress.latitud}, ${similarAddress.longitud})`);
+      // console.log('   ✅ Reutilizando dirección existente para evitar duplicados');
       
       return res.status(200).json({
         success: true,
@@ -2046,7 +2045,7 @@ const createAddress = async (req, res) => {
       longitud
     };
     
-    console.log('✅ [CREATE ADDRESS] Dirección creada:', newAddress);
+    // console.log('✅ [CREATE ADDRESS] Dirección creada:', newAddress);
     
     return res.status(201).json({
       success: true,
@@ -2064,14 +2063,14 @@ const createAddress = async (req, res) => {
 };
 
 const getAvailablePeriods = async (req, res) => {
-  console.log('\n🔵 [GET AVAILABLE PERIODS] Obteniendo períodos disponibles...');
+  // console.log('\n🔵 [GET AVAILABLE PERIODS] Obteniendo períodos disponibles...');
   try {
     // Obtener todos los registros sin filtros
     const allRecords = await dbService.getAllRecords();
     
-    console.log(`📊 Total registros en BD: ${allRecords.length}`);
+    // console.log(`📊 Total registros en BD: ${allRecords.length}`);
     if (allRecords.length > 0) {
-      console.log(`   Ejemplo primer registro fecha_inicio: ${allRecords[0].fecha_inicio}`);
+      // console.log(`   Ejemplo primer registro fecha_inicio: ${allRecords[0].fecha_inicio}`);
     }
     
     // Extraer años y meses únicos
@@ -2094,12 +2093,12 @@ const getAvailablePeriods = async (req, res) => {
           const month = String(date.getUTCMonth() + 1).padStart(2, '0');
           years.add(year);
           periodsSet.add(`${year}-${month}`);
-          console.log(`   📅 Período encontrado: ${year}-${month} (fecha original: ${dateStr})`);
+          // console.log(`   📅 Período encontrado: ${year}-${month} (fecha original: ${dateStr})`);
         } else {
-          console.log(`   ⚠️  Fecha inválida: ${dateStr}`);
+          // console.log(`   ⚠️  Fecha inválida: ${dateStr}`);
         }
       } catch (e) {
-        console.log(`   ❌ Error procesando fecha: ${rawDate} - ${e.message}`);
+        // console.log(`   ❌ Error procesando fecha: ${rawDate} - ${e.message}`);
       }
     };
 
@@ -2125,9 +2124,9 @@ const getAvailablePeriods = async (req, res) => {
       periodsByYear[year].sort();
     });
     
-    console.log(`✅ Períodos encontrados: ${sortedPeriods.length} períodos en ${sortedYears.length} años`);
-    console.log(`   Años disponibles: ${sortedYears.join(', ')}`);
-    console.log(`   Períodos por año: ${JSON.stringify(periodsByYear)}`);
+    // console.log(`✅ Períodos encontrados: ${sortedPeriods.length} períodos en ${sortedYears.length} años`);
+    // console.log(`   Años disponibles: ${sortedYears.join(', ')}`);
+    // console.log(`   Períodos por año: ${JSON.stringify(periodsByYear)}`);
     
     res.json({
       success: true,

@@ -1,0 +1,178 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {},
+  "triggers": {
+    "When_a_file_is_created_or_modified": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['onedrive']['connectionId']"
+          }
+        },
+        "method": "get",
+        "path": "/datasets/default/triggers/onnewfile",
+        "queries": {
+          "folderId": "FOLDER_ID_AQUI",
+          "includeSubfolders": true,
+          "inferContentType": true
+        }
+      },
+      "recurrence": {
+        "frequency": "Minute",
+        "interval": 5
+      },
+      "metadata": {
+        "FOLDER_ID_AQUI": "/OOH/Imports"
+      }
+    }
+  },
+  "actions": {
+    "Condition_-_Is_Excel_File": {
+      "type": "If",
+      "expression": {
+        "and": [
+          {
+            "endsWith": [
+              "@triggerOutputs()?['headers']?['x-ms-file-name']",
+              ".xlsx"
+            ]
+          }
+        ]
+      },
+      "actions": {
+        "Get_file_content": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['onedrive']['connectionId']"
+              }
+            },
+            "method": "get",
+            "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(triggerOutputs()?['headers']?['x-ms-file-id']))}/content"
+          }
+        },
+        "HTTP_-_Process_Excel": {
+          "type": "Http",
+          "inputs": {
+            "method": "POST",
+            "uri": "http://TU_SERVIDOR:5000/api/automation/process-excel",
+            "headers": {
+              "Content-Type": "multipart/form-data; boundary=----Boundary"
+            },
+            "body": "@{concat('------Boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"', triggerOutputs()?['headers']?['x-ms-file-name'], '\"\r\nContent-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n', body('Get_file_content'), '\r\n------Boundary\r\nContent-Disposition: form-data; name=\"email\"\r\n\r\nadmin@tuempresa.com\r\n------Boundary--')}"
+          },
+          "runAfter": {
+            "Get_file_content": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Parse_JSON_Response": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('HTTP_-_Process_Excel')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "processed": {
+                  "type": "integer"
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "row": {
+                        "type": "integer"
+                      },
+                      "field": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "HTTP_-_Process_Excel": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Condition_-_Check_Success": {
+          "type": "If",
+          "expression": {
+            "and": [
+              {
+                "equals": [
+                  "@body('Parse_JSON_Response')?['success']",
+                  true
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Send_Success_Email": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['office365']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/v2/Mail",
+                "body": {
+                  "To": "admin@tuempresa.com",
+                  "Subject": "✅ Excel OOH Procesado Correctamente",
+                  "Body": "<p>El archivo <strong>@{triggerOutputs()?['headers']?['x-ms-file-name']}</strong> fue procesado exitosamente.</p><p>Registros procesados: <strong>@{body('Parse_JSON_Response')?['processed']}</strong></p>"
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "Parse_JSON_Response": [
+              "Succeeded"
+            ]
+          },
+          "else": {
+            "actions": {
+              "Send_Error_Email": {
+                "type": "ApiConnection",
+                "inputs": {
+                  "host": {
+                    "connection": {
+                      "name": "@parameters('$connections')['office365']['connectionId']"
+                    }
+                  },
+                  "method": "post",
+                  "path": "/v2/Mail",
+                  "body": {
+                    "To": "admin@tuempresa.com",
+                    "Subject": "❌ Errores en Excel OOH",
+                    "Body": "<p>El archivo <strong>@{triggerOutputs()?['headers']?['x-ms-file-name']}</strong> tiene errores.</p><p>Mensaje: @{body('Parse_JSON_Response')?['message']}</p><p>Total errores: <strong>@{length(body('Parse_JSON_Response')?['errors'])}</strong></p><p><em>Revisa tu email para más detalles (el backend envía un reporte completo).</em></p>"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {}
+    }
+  },
+  "outputs": {}
+}

@@ -13,7 +13,7 @@ let SQL = null;
 const initDB = async () => {
   // Si ya está inicializado, reutilizar
   if (db) {
-    console.log('✅ Base de datos ya inicializada, reutilizando');
+    // console.log('✅ Base de datos ya inicializada, reutilizando');
     return;
   }
   
@@ -25,10 +25,10 @@ const initDB = async () => {
   if (fs.existsSync(DB_FILE)) {
     const buffer = fs.readFileSync(DB_FILE);
     db = new SQL.Database(buffer);
-    console.log('✅ Base de datos cargada desde:', DB_FILE);
+    // console.log('✅ Base de datos cargada desde:', DB_FILE);
   } else {
     db = new SQL.Database();
-    console.log('🆕 Base de datos creada en memoria');
+    // console.log('🆕 Base de datos creada en memoria');
   }
 
   // Crear tablas normalizadas - ESQUEMA PRÁCTICO SEMI-NORMALIZADO
@@ -121,7 +121,12 @@ const initDB = async () => {
       provider_id INTEGER,
       address_id INTEGER,
       city_id INTEGER,
+      category_id INTEGER,
+      region_id INTEGER,
+      estado_id INTEGER DEFAULT 1,
       checked INTEGER DEFAULT 0,
+      review_required INTEGER DEFAULT 0,
+      review_reason TEXT,
       direccion TEXT NOT NULL,
       latitud REAL,
       longitud REAL,
@@ -133,6 +138,10 @@ const initDB = async () => {
       region TEXT,
       anunciante TEXT DEFAULT 'ABI',
       categoria TEXT,
+      estado TEXT,
+      synced_to_bigquery DATETIME,
+      bq_sync_status TEXT DEFAULT 'pending',
+      last_bigquery_sync DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (brand_id) REFERENCES brands(id),
@@ -140,10 +149,22 @@ const initDB = async () => {
       FOREIGN KEY (ooh_type_id) REFERENCES ooh_types(id),
       FOREIGN KEY (provider_id) REFERENCES providers(id),
       FOREIGN KEY (address_id) REFERENCES addresses(id),
-      FOREIGN KEY (city_id) REFERENCES cities(id)
+      FOREIGN KEY (city_id) REFERENCES cities(id),
+      FOREIGN KEY (category_id) REFERENCES categories(id),
+      FOREIGN KEY (region_id) REFERENCES regions(id),
+      FOREIGN KEY (estado_id) REFERENCES ooh_states(id)
     )`,
     
-    // 11. Tabla de imágenes con FK a ooh_records
+    // 11. Tabla de estados OOH
+    `CREATE TABLE IF NOT EXISTS ooh_states (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT UNIQUE NOT NULL,
+      descripcion TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    
+    // 12. Tabla de imágenes con FK a ooh_records
     `CREATE TABLE IF NOT EXISTS images (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ooh_record_id TEXT NOT NULL,
@@ -171,7 +192,7 @@ const initDB = async () => {
       const ensureColumn = (name, type) => {
         if (!columns.includes(name)) {
           db.run(`ALTER TABLE ooh_records ADD COLUMN ${name} ${type}`);
-          console.log(`✅ Columna ${name} agregada a ooh_records`);
+          // console.log(`✅ Columna ${name} agregada a ooh_records`);
         }
       };
 
@@ -182,7 +203,7 @@ const initDB = async () => {
       ensureColumn('synced_to_bigquery', 'DATETIME');
       ensureColumn('bq_sync_status', 'TEXT DEFAULT "pending"');
     } catch (migError) {
-      console.warn('⚠️ No se pudo verificar/agregar columnas en ooh_records:', migError.message);
+      // console.warn('⚠️ No se pudo verificar/agregar columnas en ooh_records:', migError.message);
     }
 
     // Migración ligera: agregar columnas faltantes en images
@@ -193,7 +214,7 @@ const initDB = async () => {
       const ensureImageColumn = (name, type) => {
         if (!imgColumns.includes(name)) {
           db.run(`ALTER TABLE images ADD COLUMN ${name} ${type}`);
-          console.log(`✅ Columna ${name} agregada a images`);
+          // console.log(`✅ Columna ${name} agregada a images`);
         }
       };
 
@@ -204,14 +225,14 @@ const initDB = async () => {
       // Backfill: marcar primeras 3 imágenes como principales si role está vacío
       db.run("UPDATE images SET role = 'primary', slot = orden WHERE (role IS NULL OR role = '') AND orden <= 3");
     } catch (migError) {
-      console.warn('⚠️ No se pudo verificar/agregar columnas en images:', migError.message);
+      // console.warn('⚠️ No se pudo verificar/agregar columnas en images:', migError.message);
     }
     
     // Cargar datos maestros completos
     await loadMasterData();
     
     saveDB();
-    console.log('✅ Tablas normalizadas creadas (11 tablas: regions, categories, advertisers, brands, campaigns, ooh_types, providers, cities, addresses, ooh_records, images)');
+    // console.log('✅ Tablas normalizadas creadas (12 tablas: regions, categories, advertisers, brands, campaigns, ooh_types, providers, cities, addresses, ooh_records, ooh_states, images)');
   } catch (error) {
     if (!error.message.includes('already exists')) {
       console.error('❌ Error creando tablas:', error);
@@ -285,7 +306,7 @@ const loadMasterData = async () => {
     });
     
     // 1. Insertar regiones
-    console.log('🗺️  Insertando regiones...');
+    // console.log('🗺️  Insertando regiones...');
     const regionMap = {};
     const regionStmt = db.prepare('INSERT OR IGNORE INTO regions (nombre) VALUES (?)');
     for (const region of REGIONES) {
@@ -302,10 +323,10 @@ const loadMasterData = async () => {
       regionMap[row.nombre] = row.id;
     }
     selectRegiones.free();
-    console.log(`✅ ${Object.keys(regionMap).length} regiones insertadas`);
+    // console.log(`✅ ${Object.keys(regionMap).length} regiones insertadas`);
     
     // 2. Insertar categorías
-    console.log('📂 Insertando categorías...');
+    // console.log('📂 Insertando categorías...');
     const categoryMap = {};
     const categoryStmt = db.prepare('INSERT OR IGNORE INTO categories (nombre) VALUES (?)');
     for (const cat of CATEGORIAS) {
@@ -322,10 +343,10 @@ const loadMasterData = async () => {
       categoryMap[row.nombre] = row.id;
     }
     selectCategories.free();
-    console.log(`✅ ${Object.keys(categoryMap).length} categorías insertadas`);
+    // console.log(`✅ ${Object.keys(categoryMap).length} categorías insertadas`);
     
     // 3. Insertar anunciantes
-    console.log('📺 Insertando anunciantes...');
+    // console.log('📺 Insertando anunciantes...');
     const advertiserMap = {};
     const advertiserStmt = db.prepare('INSERT OR IGNORE INTO advertisers (nombre) VALUES (?)');
     for (const adv of ANUNCIANTES) {
@@ -342,10 +363,10 @@ const loadMasterData = async () => {
       advertiserMap[row.nombre] = row.id;
     }
     selectAdvertisers.free();
-    console.log(`✅ ${Object.keys(advertiserMap).length} anunciantes insertados`);
+    // console.log(`✅ ${Object.keys(advertiserMap).length} anunciantes insertados`);
     
     // 4. Insertar marcas
-    console.log('🏷️  Insertando marcas...');
+    // console.log('🏷️  Insertando marcas...');
     const brandMap = {};
     const brandStmt = db.prepare('INSERT OR IGNORE INTO brands (nombre, category_id, advertiser_id) VALUES (?, ?, ?)');
     for (const marca of MARCAS) {
@@ -364,10 +385,10 @@ const loadMasterData = async () => {
       brandMap[row.nombre] = row.id;
     }
     selectBrands.free();
-    console.log(`✅ ${Object.keys(brandMap).length} marcas insertadas`);
+    // console.log(`✅ ${Object.keys(brandMap).length} marcas insertadas`);
     
     // 5. Insertar tipos OOH
-    console.log('📺 Insertando tipos OOH...');
+    // console.log('📺 Insertando tipos OOH...');
     const oohTypeMap = {};
     const oohTypeStmt = db.prepare('INSERT OR IGNORE INTO ooh_types (nombre) VALUES (?)');
     for (const tipo of TIPOS_OOH) {
@@ -384,10 +405,10 @@ const loadMasterData = async () => {
       oohTypeMap[row.nombre] = row.id;
     }
     selectOohTypes.free();
-    console.log(`✅ ${Object.keys(oohTypeMap).length} tipos OOH insertados`);
+    // console.log(`✅ ${Object.keys(oohTypeMap).length} tipos OOH insertados`);
     
     // 6. Insertar proveedores
-    console.log('🏢 Insertando proveedores...');
+    // console.log('🏢 Insertando proveedores...');
     const providerMap = {};
     const providerStmt = db.prepare('INSERT OR IGNORE INTO providers (nombre) VALUES (?)');
     for (const prov of PROVEEDORES) {
@@ -404,11 +425,11 @@ const loadMasterData = async () => {
       providerMap[row.nombre] = row.id;
     }
     selectProviders.free();
-    console.log(`✅ ${Object.keys(providerMap).length} proveedores insertados`);
+    // console.log(`✅ ${Object.keys(providerMap).length} proveedores insertados`);
     
     // 6b. Insertar campañas
-    console.log('📢 Insertando campañas...');
-    console.log(`   Total de campañas a insertar: ${CAMPANAS.length}`);
+    // console.log('📢 Insertando campañas...');
+    // console.log(`   Total de campañas a insertar: ${CAMPANAS.length}`);
     const campaignMap = {};
     const campaignStmt = db.prepare('INSERT OR IGNORE INTO campaigns (nombre, brand_id) VALUES (?, ?)');
     for (const camp of CAMPANAS) {
@@ -418,7 +439,7 @@ const loadMasterData = async () => {
         campaignStmt.step();
         campaignStmt.reset();
       } else {
-        console.warn(`   ⚠️  Marca "${camp.marca}" no encontrada para campaña "${camp.nombre}"`);
+        // console.warn(`   ⚠️  Marca "${camp.marca}" no encontrada para campaña "${camp.nombre}"`);
       }
     }
     campaignStmt.free();
@@ -430,10 +451,10 @@ const loadMasterData = async () => {
       campaignMap[row.nombre] = row.id;
     }
     selectCampaigns.free();
-    console.log(`✅ ${Object.keys(campaignMap).length} campañas insertadas`);
+    // console.log(`✅ ${Object.keys(campaignMap).length} campañas insertadas`);
     
     // 7. Insertar ciudades
-    console.log('🏙️  Insertando ciudades...');
+    // console.log('🏙️  Insertando ciudades...');
     const cityMap = {};
     const cityStmt = db.prepare('INSERT OR IGNORE INTO cities (nombre, region_id, latitud, longitud, radio_km) VALUES (?, ?, ?, ?, ?)');
     for (const [nombre, datos] of Object.entries(CIUDADES_COORDS)) {
@@ -451,9 +472,35 @@ const loadMasterData = async () => {
       cityMap[row.nombre] = row.id;
     }
     selectCities.free();
-    console.log(`✅ ${Object.keys(cityMap).length} ciudades insertadas`);
+    // console.log(`✅ ${Object.keys(cityMap).length} ciudades insertadas`);
     
-    console.log('✅ Todos los datos maestros cargados exitosamente');
+    // 8. Insertar estados OOH por defecto
+    // console.log('📊 Insertando estados OOH...');
+    const ESTADOS = [
+      { nombre: 'ACTIVO', descripcion: 'Registro activo y vigente' },
+      { nombre: 'INACTIVO', descripcion: 'Registro inactivo' },
+      { nombre: 'PENDIENTE', descripcion: 'Pendiente de verificación' },
+      { nombre: 'ARCHIVADO', descripcion: 'Registro archivado' }
+    ];
+    const stateStmt = db.prepare('INSERT OR IGNORE INTO ooh_states (nombre, descripcion) VALUES (?, ?)');
+    for (const estado of ESTADOS) {
+      stateStmt.bind([estado.nombre, estado.descripcion]);
+      stateStmt.step();
+      stateStmt.reset();
+    }
+    stateStmt.free();
+    
+    // Recuperar IDs de estados
+    const selectStates = db.prepare('SELECT id, nombre FROM ooh_states');
+    const stateMap = {};
+    while (selectStates.step()) {
+      const row = selectStates.getAsObject();
+      stateMap[row.nombre] = row.id;
+    }
+    selectStates.free();
+    // console.log(`✅ ${Object.keys(stateMap).length} estados insertados`);
+    
+    // console.log('✅ Todos los datos maestros cargados exitosamente');
     
   } catch (error) {
     console.error('❌ Error cargando datos maestros:', error.message);
@@ -464,14 +511,14 @@ const loadMasterData = async () => {
 // Guardar cambios a disco
 const saveDB = () => {
   if (!db) {
-    console.warn('⚠️  DB no inicializada, no se puede guardar');
+    // console.warn('⚠️  DB no inicializada, no se puede guardar');
     return;
   }
   try {
     const data = db.export();
     const buffer = Buffer.from(data);
     fs.writeFileSync(DB_FILE, buffer);
-    console.log(`💾 Base de datos guardada en: ${DB_FILE} (${buffer.length} bytes)`);
+    // console.log(`💾 Base de datos guardada en: ${DB_FILE} (${buffer.length} bytes)`);
   } catch (error) {
     console.error('❌ Error guardando BD:', error);
   }
@@ -504,7 +551,7 @@ const getOrCreateBrand = async (brandName, categoria) => {
   const newId = stmt.getAsObject().id;
   stmt.free();
   
-  console.log(`✅ Marca creada: ${normalized} (ID: ${newId})`);
+  // console.log(`✅ Marca creada: ${normalized} (ID: ${newId})`);
   return newId;
 };
 
@@ -533,7 +580,7 @@ const getOrCreateCampaign = async (campaignName, brandId) => {
   const newId = stmt.getAsObject().id;
   stmt.free();
   
-  console.log(`✅ Campaña creada: ${normalized} para brand_id ${brandId} (ID: ${newId})`);
+  // console.log(`✅ Campaña creada: ${normalized} para brand_id ${brandId} (ID: ${newId})`);
   return newId;
 };
 
@@ -562,7 +609,7 @@ const getOrCreateOOHType = async (typeName) => {
   const newId = stmt.getAsObject().id;
   stmt.free();
   
-  console.log(`✅ Tipo OOH creado: ${normalized} (ID: ${newId})`);
+  // console.log(`✅ Tipo OOH creado: ${normalized} (ID: ${newId})`);
   return newId;
 };
 
@@ -591,7 +638,7 @@ const getOrCreateProvider = async (providerName) => {
   const newId = stmt.getAsObject().id;
   stmt.free();
   
-  console.log(`✅ Proveedor creado: ${normalized} (ID: ${newId})`);
+  // console.log(`✅ Proveedor creado: ${normalized} (ID: ${newId})`);
   return newId;
 };
 
@@ -605,7 +652,7 @@ const addRecord = async (data) => {
     
     // ✅ SI es una URL (GCS o HTTP), retornarla tal cual (nunca convertir URLs a rutas locales)
     if (typeof imagePath === 'string' && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
-      console.log(`✅ URL de GCS detectada, guardando tal cual: ${imagePath.substring(0, 80)}...`);
+      // console.log(`✅ URL de GCS detectada, guardando tal cual: ${imagePath.substring(0, 80)}...`);
       return imagePath;
     }
     
@@ -663,10 +710,10 @@ const addRecord = async (data) => {
     const city = getCityByName(data.ciudad);
     if (city) {
       cityId = city.id;
-      console.log(`✅ Ciudad encontrada en BD: ${data.ciudad} (ID: ${cityId})`);
+      // console.log(`✅ Ciudad encontrada en BD: ${data.ciudad} (ID: ${cityId})`);
     } else {
       console.error(`❌ Ciudad NO encontrada en BD: ${data.ciudad}`);
-      console.log(`📍 Ciudades disponibles en BD: ${getAllCities().map(c => c.nombre).join(', ')}`);
+      // console.log(`📍 Ciudades disponibles en BD: ${getAllCities().map(c => c.nombre).join(', ')}`);
       throw new Error(`Ciudad "${data.ciudad}" no existe en la base de datos. Por favor, usa una ciudad válida.`);
     }
   } else {
@@ -701,12 +748,12 @@ const addRecord = async (data) => {
     addrStmt.free();
   }
 
-  // Insertar ooh_record con solo FKs
+  // Insertar ooh_record con solo FKs (sin columnas redundantes)
   const stmt = db.prepare(`
     INSERT INTO ooh_records 
     (id, brand_id, campaign_id, ooh_type_id, provider_id, address_id,
-     checked, fecha_inicio, fecha_final, imagen_1, imagen_2, imagen_3)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     checked, review_required, review_reason, fecha_inicio, fecha_final)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.bind([
@@ -717,11 +764,10 @@ const addRecord = async (data) => {
     providerId,
     addressId,
     data.checked ? 1 : 0,
+    data.review_required ? 1 : 0,
+    data.review_reason || null,
     data.fechaInicio || '',
-    data.fechaFin || '',
-    img1 || '',
-    img2 || '',
-    img3 || ''
+    data.fechaFin || ''
   ]);
 
   stmt.step();
@@ -746,7 +792,7 @@ const addRecord = async (data) => {
   }
   
   saveDB();
-  console.log('✅ Registro insertado:', data.id);
+  // console.log('✅ Registro insertado:', data.id);
 };
 
 // Actualizar registro existente
@@ -759,7 +805,7 @@ const updateRecord = async (id, data) => {
     
     // ✅ SI es una URL (GCS o HTTP), retornarla tal cual (nunca convertir URLs a rutas locales)
     if (typeof imagePath === 'string' && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
-      console.log(`✅ URL de GCS detectada, guardando tal cual: ${imagePath.substring(0, 80)}...`);
+      // console.log(`✅ URL de GCS detectada, guardando tal cual: ${imagePath.substring(0, 80)}...`);
       return imagePath;
     }
     
@@ -837,10 +883,10 @@ const updateRecord = async (id, data) => {
     const city = getCityByName(data.ciudad);
     if (city) {
       cityId = city.id;
-      console.log(`✅ Ciudad encontrada en BD: ${data.ciudad} (ID: ${cityId})`);
+      // console.log(`✅ Ciudad encontrada en BD: ${data.ciudad} (ID: ${cityId})`);
     } else {
       console.error(`❌ Ciudad NO encontrada en BD: ${data.ciudad}`);
-      console.log(`📍 Ciudades disponibles en BD: ${getAllCities().map(c => c.nombre).join(', ')}`);
+      // console.log(`📍 Ciudades disponibles en BD: ${getAllCities().map(c => c.nombre).join(', ')}`);
       throw new Error(`Ciudad "${data.ciudad}" no existe en la base de datos. Por favor, usa una ciudad válida.`);
     }
   } else {
@@ -885,7 +931,7 @@ const updateRecord = async (id, data) => {
     addressId = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
   }
 
-  // Actualizar registro OOH (incluye imágenes para mantener compatibilidad)
+  // Actualizar registro OOH (sin columnas redundantes)
   // IMPORTANTE: Marcar como pendiente de sincronización si hay cambios en imágenes
   const hasPendingChanges = data.imagenes && data.imagenes.length > 0;
   
@@ -893,7 +939,6 @@ const updateRecord = async (id, data) => {
     UPDATE ooh_records SET
       brand_id = ?, campaign_id = ?, ooh_type_id = ?, address_id = ?, provider_id = ?,
       checked = ?, fecha_inicio = ?, fecha_final = ?,
-      imagen_1 = ?, imagen_2 = ?, imagen_3 = ?,
       bq_sync_status = ?, synced_to_bigquery = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
@@ -908,9 +953,6 @@ const updateRecord = async (id, data) => {
     typeof data.checked === 'undefined' ? (existing ? existing.checked : 0) : (data.checked ? 1 : 0),
     data.fechaInicio || '',
     fechaFinal,
-    img1 || '',
-    img2 || '',
-    img3 || '',
     hasPendingChanges ? 'pending' : existing?.bq_sync_status || 'pending', // Marcar como pending si hay nuevas imágenes
     hasPendingChanges ? null : existing?.synced_to_bigquery, // Limpiar timestamp si hay cambios
     id
@@ -941,7 +983,7 @@ const updateRecord = async (id, data) => {
   }
   
   saveDB();
-  console.log('✅ Registro actualizado:', id);
+  // console.log('✅ Registro actualizado:', id);
 };
 
 // Obtener registro por ID
@@ -1115,6 +1157,16 @@ const getAllRecords = (filters = {}) => {
       r.fecha_inicio,
       r.fecha_final,
       r.checked,
+      r.review_required,
+      r.review_reason,
+      r.estado_id,
+      r.brand_id,
+      r.campaign_id,
+      r.ooh_type_id,
+      r.provider_id,
+      addr.city_id as city_id,
+      b.category_id as category_id,
+      city.region_id as region_id,
       r.created_at,
       r.updated_at,
       b.nombre as marca, 
@@ -1127,7 +1179,9 @@ const getAllRecords = (filters = {}) => {
       addr.latitud,
       addr.longitud,
       adv.nombre as anunciante,
-      cat.nombre as categoria
+      cat.nombre as categoria,
+      est.nombre as estado,
+      est.descripcion as estado_descripcion
     FROM ooh_records r
     LEFT JOIN brands b ON r.brand_id = b.id
     LEFT JOIN campaigns c ON r.campaign_id = c.id
@@ -1138,6 +1192,7 @@ const getAllRecords = (filters = {}) => {
     LEFT JOIN regions region ON city.region_id = region.id
     LEFT JOIN categories cat ON b.category_id = cat.id
     LEFT JOIN advertisers adv ON b.advertiser_id = adv.id
+    LEFT JOIN ooh_states est ON r.estado_id = est.id
     WHERE 1=1
   `;
   const params = [];
@@ -1164,15 +1219,17 @@ const getAllRecords = (filters = {}) => {
 
   if (filters.mes) {
     // Filtrar por mes (yyyy-MM) si inicio o fin cae en el mes
+    // sql.js doesn't support strftime, so we use SUBSTR for ISO format dates (YYYY-MM-DD)
     const mes = String(filters.mes).trim();
-    query += " AND (strftime('%Y-%m', r.fecha_inicio) = ? OR strftime('%Y-%m', IFNULL(r.fecha_final, r.fecha_inicio)) = ?)";
+    query += " AND (SUBSTR(r.fecha_inicio, 1, 7) = ? OR SUBSTR(IFNULL(r.fecha_final, r.fecha_inicio), 1, 7) = ?)";
     params.push(mes, mes);
   }
 
   if (filters.ano && !filters.mes) {
     // Filtrar por año (yyyy) si inicio o fin cae en el año
+    // sql.js doesn't support strftime, so we use SUBSTR for ISO format dates (YYYY-MM-DD)
     const year = String(filters.ano).trim();
-    query += " AND (strftime('%Y', r.fecha_inicio) = ? OR strftime('%Y', IFNULL(r.fecha_final, r.fecha_inicio)) = ?)";
+    query += " AND (SUBSTR(r.fecha_inicio, 1, 4) = ? OR SUBSTR(IFNULL(r.fecha_final, r.fecha_inicio), 1, 4) = ?)";
     params.push(year, year);
   }
 
@@ -1336,7 +1393,7 @@ const deleteRecord = (id) => {
   stmt.step();
   stmt.free();
   saveDB();
-  console.log('✅ Registro eliminado:', id);
+  // console.log('✅ Registro eliminado:', id);
   return true;
 };
 
@@ -1345,7 +1402,7 @@ const deleteOOHRecord = (id) => {
   if (!db) return { success: false, error: 'Database not initialized' };
 
   try {
-    console.log(`🗑️  Eliminando registro completo: ${id}`);
+    // console.log(`🗑️  Eliminando registro completo: ${id}`);
 
     // 1. Obtener las rutas de imágenes
     const imgStmt = db.prepare('SELECT ruta FROM images WHERE ooh_record_id = ?');
@@ -1358,7 +1415,7 @@ const deleteOOHRecord = (id) => {
     }
     imgStmt.free();
 
-    console.log(`   Imágenes a eliminar: ${imagePaths.length}`);
+    // console.log(`   Imágenes a eliminar: ${imagePaths.length}`);
 
     // 2. Eliminar archivos del disco
     const fs = require('fs');
@@ -1367,11 +1424,11 @@ const deleteOOHRecord = (id) => {
       try {
         if (fs.existsSync(imagePath)) {
           fs.unlinkSync(imagePath);
-          console.log(`   ✓ Archivo eliminado: ${imagePath}`);
+          // console.log(`   ✓ Archivo eliminado: ${imagePath}`);
           deletedFiles++;
         }
       } catch (err) {
-        console.warn(`   ⚠️  No se pudo eliminar: ${imagePath}`, err.message);
+        // console.warn(`   ⚠️  No se pudo eliminar: ${imagePath}`, err.message);
       }
     });
 
@@ -1381,7 +1438,7 @@ const deleteOOHRecord = (id) => {
     deleteImgsStmt.step();
     deleteImgsStmt.free();
 
-    console.log(`   Imágenes eliminadas de BD: ${imagePaths.length}`);
+    // console.log(`   Imágenes eliminadas de BD: ${imagePaths.length}`);
 
     // 4. Eliminar registro de la BD
     const deleteRecStmt = db.prepare('DELETE FROM ooh_records WHERE id = ?');
@@ -1392,7 +1449,7 @@ const deleteOOHRecord = (id) => {
     // 5. Guardar BD
     saveDB();
 
-    console.log(`✅ Registro ${id} eliminado correctamente`);
+    // console.log(`✅ Registro ${id} eliminado correctamente`);
     
     return { 
       success: true, 
@@ -1541,7 +1598,7 @@ const addCity = (nombre, region) => {
   stmt.free();
   
   saveDB();
-  console.log(`✅ Ciudad insertada: ${nombre}`);
+  // console.log(`✅ Ciudad insertada: ${nombre}`);
   
   // Retornar la ciudad creada
   return getCityByName(nombre);
@@ -1735,7 +1792,7 @@ const addOOHState = async (nombre, descripcion = '') => {
     lastIdStmt.free();
     
     await saveDB();
-    console.log(`✅ Estado OOH creado: "${nombre}" con ID: ${newId}`);
+    // console.log(`✅ Estado OOH creado: "${nombre}" con ID: ${newId}`);
     return newId;
   } catch (error) {
     console.error(`❌ Error creando estado OOH "${nombre}":`, error);
