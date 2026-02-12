@@ -680,6 +680,21 @@
   word-break: break-word;
 }
 
+.detail-row-full {
+  padding: 15px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  border-left: 4px solid #2196F3;
+  margin: 15px 0;
+}
+
+.detail-row-full strong {
+  color: #000;
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.95em;
+}
+
 .detail-row.review-warning {
   background: #fff3e0;
   border-left-color: #ff9800;

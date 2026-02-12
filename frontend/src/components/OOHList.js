@@ -6,6 +6,7 @@ import dbService from '../services/dbService';
 import RecordCard from './RecordCard';
 import RecordTableView from './RecordTableView';
 import RecordCardsView from './RecordCardsView';
+import MapPicker from './MapPicker';
 
 const OOHList = ({ refreshTrigger }) => {
   const PAGE_SIZE = 30;
@@ -1334,6 +1335,26 @@ const OOHList = ({ refreshTrigger }) => {
                     <span>{selectedRecord.latitud},{selectedRecord.longitud}</span>
                   )}
                 </div>
+
+                {/* Mapa de ubicación */}
+                {selectedRecord.latitud && selectedRecord.longitud && (
+                  <div className="detail-row-full">
+                    <strong>📍 Ubicación en el mapa:</strong>
+                    <MapPicker
+                      latitude={editMode ? editData.latitud : selectedRecord.latitud}
+                      longitude={editMode ? editData.longitud : selectedRecord.longitud}
+                      onLocationChange={editMode ? (lat, lng) => {
+                        handleEditChange('latitud', lat.toFixed(4));
+                        handleEditChange('longitud', lng.toFixed(4));
+                      } : null}
+                      editable={editMode}
+                      height="250px"
+                      zoom={15}
+                      showCoordinates={true}
+                    />
+                  </div>
+                )}
+
                 <div className="detail-row">
                   <strong>Fecha Inicio:</strong>
                   {editMode ? (

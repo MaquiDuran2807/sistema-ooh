@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ciudades as ciudadesData } from '../data/ciudades';
+import MapPicker from './MapPicker';
 import './AddCiudadModal.css';
 
 const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
@@ -26,6 +26,7 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
       setMsgExiste('');
       setCoordSource('');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nuevaCiudad]);
 
   const buscarCoordenadas = async () => {
@@ -72,6 +73,12 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleMapLocationChange = (lat, lng) => {
+    setLatitud(lat.toFixed(4));
+    setLongitud(lng.toFixed(4));
+    setError('');
   };
 
   const handleAdd = () => {
@@ -259,6 +266,25 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
               {coordSource === 'existing' && '✅ Ciudad ya existe (mostrando datos existentes)'}
               {coordSource === 'manual' && '✏️ Ingresa coordenadas manualmente'}
             </div>
+          )}
+
+          {/* Mapa interactivo */}
+          {latitud && longitud && radio && (
+            <MapPicker
+              latitude={latitud}
+              longitude={longitud}
+              onLocationChange={handleMapLocationChange}
+              editable={!msgExiste}
+              height="350px"
+              zoom={12}
+              showCoordinates={false}
+              cityCenter={{
+                lat: parseFloat(latitud),
+                lng: parseFloat(longitud),
+                radius: parseFloat(radio)
+              }}
+              showRadius={true}
+            />
           )}
         </div>
 

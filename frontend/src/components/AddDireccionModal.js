@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import MapPicker from './MapPicker';
 import './AddDireccionModal.css';
 
 // Constante de conversión: 1 grado de latitud ≈ 111.32 km
@@ -7,6 +8,19 @@ const KM_PER_DEGREE_LAT = 111.32;
 // Conversión dinámica de longitud (varía con la latitud)
 const getKmPerDegreeLong = (lat) => {
   return KM_PER_DEGREE_LAT * Math.cos(lat * Math.PI / 180);
+};
+
+// Calcular distancia entre dos puntos usando Haversine
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radio de la Tierra en km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
 const AddDireccionModal = ({ isOpen, onClose, onAdd, cities = [] }) => {
@@ -32,9 +46,50 @@ const AddDireccionModal = ({ isOpen, onClose, onAdd, cities = [] }) => {
       const city = cities.find(c => c.nombre === value);
       setSelectedCity(city || null);
       setValidationMessage('');
+      // Auto-rellenar con centro de ciudad
+      if (city && city.latitud && city.longitud) {
+        setFormData(prev => ({
+          ...prev,
+          latitud: city.latitud.toString(),
+          longitud: city.longitud.toString()
+        }));
+      }
     } else if ((name === 'latitud' || name === 'longitud') && selectedCity) {
       // Validar si las coordenadas están dentro del rango
       validateCoordinates(name, value);
+    }
+  };
+
+  const handleMapLocationChange = (lat, lng) => {
+    setFormData(prev => ({
+      ...prev,
+      latitud: lat.toFixed(4),
+      longitud: lng.toFixed(4)
+    }));
+    
+    if (selectedCity) {
+      validateCoordinatesAtPosition(lat, lng);
+    }
+  };
+
+  const validateCoordinatesAtPosition = (lat, lng) => {
+    if (!geoBounds) return;
+    
+    const isLatValid = lat >= geoBounds.minLat && lat <= geoBounds.maxLat;
+    const isLongValid = lng >= geoBounds.minLong && lng <= geoBounds.maxLong;
+
+    if (!isLatValid || !isLongValid) {
+      const distance = calculateDistance(
+        geoBounds.centerLat,
+        geoBounds.centerLong,
+        lat,
+        lng
+      );
+      setValidationMessage(
+        `⚠️ Ubicación fuera del rango de ${selectedCity.nombre} (${distance.toFixed(1)} km del centro, máx: ${geoBounds.radioKm} km)`
+      );
+    } else {
+      setValidationMessage('');
     }
   };
 
@@ -227,6 +282,25 @@ const AddDireccionModal = ({ isOpen, onClose, onAdd, cities = [] }) => {
             <div className={`validation-message ${validationMessage.includes('✅') ? 'success' : 'warning'}`}>
               {validationMessage}
             </div>
+          )}
+
+          {/* Mapa interactivo con radio de la ciudad */}
+          {formData.latitud && formData.longitud && (
+            <MapPicker
+              latitude={formData.latitud}
+              longitude={formData.longitud}
+              onLocationChange={handleMapLocationChange}
+              editable={true}
+              height="350px"
+              zoom={14}
+              showCoordinates={true}
+              cityCenter={selectedCity && selectedCity.latitud && selectedCity.longitud ? {
+                lat: parseFloat(selectedCity.latitud),
+                lng: parseFloat(selectedCity.longitud),
+                radius: parseFloat(selectedCity.radio_km || selectedCity.radioKm || 10)
+              } : null}
+              showRadius={true}
+            />
           )}
 
           <div className="modal-buttons">
