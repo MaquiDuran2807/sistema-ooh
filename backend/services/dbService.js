@@ -112,33 +112,20 @@ const initDB = async () => {
       FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE CASCADE
     )`,
     
-    // 10. Tabla de registros OOH - SEMI-NORMALIZADO (tiene FK pero también columnas desnormalizadas para compatibilidad)
+    // 10. Tabla de registros OOH - NORMALIZADO (solo FKs, sin columnas redundantes)
     `CREATE TABLE IF NOT EXISTS ooh_records (
       id TEXT PRIMARY KEY,
-      brand_id INTEGER,
-      campaign_id INTEGER,
-      ooh_type_id INTEGER,
-      provider_id INTEGER,
-      address_id INTEGER,
-      city_id INTEGER,
-      category_id INTEGER,
-      region_id INTEGER,
+      brand_id INTEGER NOT NULL,
+      campaign_id INTEGER NOT NULL,
+      ooh_type_id INTEGER NOT NULL,
+      provider_id INTEGER NOT NULL,
+      address_id INTEGER NOT NULL,
       estado_id INTEGER DEFAULT 1,
       checked INTEGER DEFAULT 0,
       review_required INTEGER DEFAULT 0,
       review_reason TEXT,
-      direccion TEXT NOT NULL,
-      latitud REAL,
-      longitud REAL,
-      fecha_inicio TEXT,
+      fecha_inicio TEXT NOT NULL,
       fecha_final TEXT,
-      imagen_1 TEXT,
-      imagen_2 TEXT,
-      imagen_3 TEXT,
-      region TEXT,
-      anunciante TEXT DEFAULT 'ABI',
-      categoria TEXT,
-      estado TEXT,
       synced_to_bigquery DATETIME,
       bq_sync_status TEXT DEFAULT 'pending',
       last_bigquery_sync DATETIME,
@@ -149,9 +136,6 @@ const initDB = async () => {
       FOREIGN KEY (ooh_type_id) REFERENCES ooh_types(id),
       FOREIGN KEY (provider_id) REFERENCES providers(id),
       FOREIGN KEY (address_id) REFERENCES addresses(id),
-      FOREIGN KEY (city_id) REFERENCES cities(id),
-      FOREIGN KEY (category_id) REFERENCES categories(id),
-      FOREIGN KEY (region_id) REFERENCES regions(id),
       FOREIGN KEY (estado_id) REFERENCES ooh_states(id)
     )`,
     
@@ -197,11 +181,12 @@ const initDB = async () => {
       };
 
       ensureColumn('checked', 'INTEGER DEFAULT 0');
-      ensureColumn('imagen_1', 'TEXT');
-      ensureColumn('imagen_2', 'TEXT');
-      ensureColumn('imagen_3', 'TEXT');
+      ensureColumn('review_required', 'INTEGER DEFAULT 0');
+      ensureColumn('review_reason', 'TEXT');
       ensureColumn('synced_to_bigquery', 'DATETIME');
       ensureColumn('bq_sync_status', 'TEXT DEFAULT "pending"');
+      ensureColumn('last_bigquery_sync', 'DATETIME');
+      ensureColumn('updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
     } catch (migError) {
       // console.warn('⚠️ No se pudo verificar/agregar columnas en ooh_records:', migError.message);
     }
@@ -1571,7 +1556,7 @@ const getCityNameVariations = (cityName) => {
 };
 
 // Crear nueva ciudad en BD
-const addCity = (nombre, region) => {
+const addCity = (nombre, region, latitud = null, longitud = null, radio = null) => {
   if (!db) return null;
   
   // Obtener el ID de la región
@@ -1588,17 +1573,21 @@ const addCity = (nombre, region) => {
     throw new Error(`Región "${region}" no encontrada en la base de datos`);
   }
   
+  // Usar valores por defecto si no se proporcionan coordenadas
+  const LAT = latitud !== null && latitud !== undefined ? parseFloat(latitud) : 0;
+  const LON = longitud !== null && longitud !== undefined ? parseFloat(longitud) : 0;
+  const RADIO = radio !== null && radio !== undefined ? parseFloat(radio) : 15;
+  
   // Insertar la ciudad
   const stmt = db.prepare(`
     INSERT INTO cities (nombre, region_id, latitud, longitud, radio_km)
-    VALUES (?, ?, 0, 0, 15)
+    VALUES (?, ?, ?, ?, ?)
   `);
-  stmt.bind([nombre.toUpperCase(), regionId]);
+  stmt.bind([nombre.toUpperCase(), regionId, LAT, LON, RADIO]);
   stmt.step();
   stmt.free();
   
   saveDB();
-  // console.log(`✅ Ciudad insertada: ${nombre}`);
   
   // Retornar la ciudad creada
   return getCityByName(nombre);
@@ -1800,6 +1789,76 @@ const addOOHState = async (nombre, descripcion = '') => {
   }
 };
 
+
+// ==================== FUNCIONES DE GEOCODIFICACIÓN ====================
+
+// Cache en memoria para coordenadas ya buscadas
+const geocodeCache = {};
+
+// Función para obtener coordenadas automáticamente por nombre de ciudad
+const getCoordinates = async (cityName, region = null) => {
+  try {
+    const cacheKey = `${cityName}_${region || 'defaultRegion'}`.toUpperCase();
+    
+    // Verificar si ya está en caché
+    if (geocodeCache[cacheKey]) {
+      return geocodeCache[cacheKey];
+    }
+
+    // Importar node-geocoder
+    const NodeGeocoder = require('node-geocoder');
+    
+    // Configurar geocoder con OpenStreetMap (Nominatim) - gratuito, sin API key
+    const options = {
+      provider: 'openstreetmap',
+      timeout: 5000,
+      retryOnTimeout: true,
+      minWaitingTime: 1000
+    };
+    
+    const geocoder = NodeGeocoder(options);
+    
+    // Compilar búsqueda con nombre de ciudad y región
+    let searchQuery = cityName;
+    if (region && !region.includes('CO')) {
+      searchQuery += ', ' + region;
+    } else if (region) {
+      searchQuery += ', Colombia';  // Si es región de Colombia
+    } else {
+      searchQuery += ', Colombia';  // Default a Colombia
+    }
+
+    // Buscar coordenadas
+    const results = await geocoder.geocode(searchQuery);
+    
+    if (results && results.length > 0) {
+      const result = results[0];  // Tomar el primer resultado
+      const coordinates = {
+        latitude: parseFloat(result.latitude.toFixed(4)),
+        longitude: parseFloat(result.longitude.toFixed(4)),
+        source: 'nominatim',
+        confidence: 'high'
+      };
+      
+      // Cachear resultado
+      geocodeCache[cacheKey] = coordinates;
+      
+      return coordinates;
+    }
+    
+    return null;
+    
+  } catch (error) {
+    console.error(`⚠️ [GEOCODE] Error buscando coordenadas para "${cityName}":`, error.message);
+    return null;
+  }
+};
+
+// Limpiar caché de geocodificación (útil para testing)
+const clearGeocodeCache = () => {
+  Object.keys(geocodeCache).forEach(key => delete geocodeCache[key]);
+};
+
 module.exports = {
   initDB,
   addRecord,
@@ -1853,6 +1912,9 @@ module.exports = {
   getRecordImages,
   addRecordImages,
   setRecordImageRoles,
+  // Funciones de geocodificación
+  getCoordinates,
+  clearGeocodeCache,
   // Función para obtener la instancia de DB
   getDatabase: () => db
 };

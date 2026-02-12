@@ -57,6 +57,9 @@ router.post('/types', oohController.createOOHType);
 // GET - Obtener todas las ciudades
 router.get('/cities', oohController.getAllCities);
 
+// GET - Obtener coordenadas automáticamente por nombre de ciudad
+router.get('/cities/coordinates', oohController.getCityCoordinates);
+
 // GET - Obtener ciudades por región
 router.get('/cities/region/:region', oohController.getCitiesByRegion);
 

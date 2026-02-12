@@ -162,31 +162,35 @@ const getLocalImagePath = (inputPath) => {
   return fullPath;
 };
 
-const buildBigQueryPayload = (record) => ({
-  id: record.id,
-  brand_id: record.brand_id,
-  campaign_id: record.campaign_id,
-  ooh_type_id: record.ooh_type_id,
-  provider_id: record.provider_id,
-  city_id: record.city_id,
-  category_id: record.category_id || null,
-  region_id: record.region_id || null,
-  brand_name: record.marca || null,
-  campaign_name: record.campana || null,
-  ooh_type_name: record.tipo_ooh || null,
-  provider_name: record.proveedor || null,
-  city_name: record.ciudad || null,
-  address: record.direccion || null,
-  latitude: record.latitud || null,
-  longitude: record.longitud || null,
-  start_date: record.fecha_inicio || null,
-  end_date: record.fecha_final || null,
-  created_at: record.created_at || null,
-  checked: record.checked ? true : false,
-  image_1_url: record.imagen_1 || null,
-  image_2_url: record.imagen_2 || null,
-  image_3_url: record.imagen_3 || null
-});
+const buildBigQueryPayload = (record) => {
+  // Los datos derivados ya vienen del JOIN en getRecordById/getAllRecords
+  // Simplemente los mapeamos al formato de BigQuery
+  return {
+    id: record.id,
+    brand_id: record.brand_id,
+    campaign_id: record.campaign_id,
+    ooh_type_id: record.ooh_type_id,
+    provider_id: record.provider_id,
+    city_id: record.city_id || null,  // Derivado: address -> city
+    category_id: record.category_id || null,  // Derivado: brand -> category
+    region_id: record.region_id || null,  // Derivado: city -> region
+    brand_name: record.marca || null,
+    campaign_name: record.campana || null,
+    ooh_type_name: record.tipo_ooh || null,
+    provider_name: record.proveedor || null,
+    city_name: record.ciudad || null,
+    address: record.direccion || null,  // Derivado: address.descripcion
+    latitude: record.latitud || null,  // Derivado: address.latitud
+    longitude: record.longitud || null,  // Derivado: address.longitud
+    start_date: record.fecha_inicio || null,
+    end_date: record.fecha_final || null,
+    created_at: record.created_at || null,
+    checked: record.checked ? true : false,
+    image_1_url: record.imagen_1 || null,  // Derivado: images[0]
+    image_2_url: record.imagen_2 || null,  // Derivado: images[1]
+    image_3_url: record.imagen_3 || null  // Derivado: images[2]
+  };
+};
 
 const createOOH = async (req, res) => {
   // 📊 Detectar si es CREATE o UPDATE
@@ -1364,7 +1368,7 @@ const initializeApp = (req, res) => {
 // Crear nueva ciudad
 const createCity = async (req, res) => {
   try {
-    const { nombre, region } = req.body;
+    const { nombre, region, latitud, longitud, radio } = req.body;
     
     if (!nombre || !nombre.trim()) {
       return res.status(400).json({ 
@@ -1379,14 +1383,44 @@ const createCity = async (req, res) => {
         valid: false
       });
     }
+
+    if (latitud === undefined || latitud === null || latitud === '') {
+      return res.status(400).json({
+        error: 'Latitud requerida',
+        valid: false
+      });
+    }
+
+    if (longitud === undefined || longitud === null || longitud === '') {
+      return res.status(400).json({
+        error: 'Longitud requerida',
+        valid: false
+      });
+    }
+
+    if (radio === undefined || radio === null || radio === '') {
+      return res.status(400).json({
+        error: 'Radio requerido',
+        valid: false
+      });
+    }
     
     const CIUDAD = nombre.toUpperCase();
     const REGION = region.toUpperCase();
+    const LAT = parseFloat(latitud);
+    const LON = parseFloat(longitud);
+    const RADIO = parseFloat(radio);
+
+    if (isNaN(LAT) || isNaN(LON) || isNaN(RADIO)) {
+      return res.status(400).json({
+        error: 'Coordenadas inválidas. Deben ser números',
+        valid: false
+      });
+    }
     
     // Validar si la ciudad ya existe
     const validation = dbService.validateCityName(CIUDAD);
     if (!validation.isValid) {
-      // console.log(`⚠️ [CREATE CITY] Duplicado detectado: ${validation.message}`);
       return res.status(400).json({
         success: false,
         valid: false,
@@ -1400,13 +1434,12 @@ const createCity = async (req, res) => {
     }
     
     // Crear la ciudad en BD
-    const newCity = dbService.addCity(CIUDAD, REGION);
+    const newCity = dbService.addCity(CIUDAD, REGION, LAT, LON, RADIO);
     
-    // console.log(`✅ [CREATE CITY] Ciudad creada: ${CIUDAD} en región ${REGION}`);
     return res.status(201).json({
       success: true,
       valid: true,
-      message: `Ciudad "${CIUDAD}" creada exitosamente en región "${REGION}"`,
+      message: `Ciudad "${CIUDAD}" creada exitosamente`,
       data: newCity
     });
     
@@ -1414,6 +1447,75 @@ const createCity = async (req, res) => {
     console.error('❌ Error creando ciudad:', error);
     return res.status(500).json({ 
       error: 'Error al crear la ciudad',
+      details: error.message
+    });
+  }
+};
+
+// Buscar coordenadas automáticamente por nombre de ciudad
+const getCityCoordinates = async (req, res) => {
+  try {
+    const { nombre, region } = req.query;
+    
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({
+        error: 'Nombre de ciudad requerido',
+        success: false
+      });
+    }
+
+    const CIUDAD = nombre.toUpperCase();
+    
+    // Verificar si la ciudad ya existe en BD
+    const existingCity = dbService.getCityByName(CIUDAD);
+    if (existingCity) {
+      return res.json({
+        success: true,
+        exists: true,
+        message: `Ciudad "${CIUDAD}" ya existe en la base de datos`,
+        data: existingCity
+      });
+    }
+
+    // Buscar coordenadas automáticamente
+    const coordinates = await dbService.getCoordinates(CIUDAD, region);
+    
+    if (coordinates) {
+      return res.json({
+        success: true,
+        exists: false,
+        found: true,
+        message: `Coordenadas encontradas automáticamente para "${CIUDAD}"`,
+        data: {
+          nombre: CIUDAD,
+          latitud: coordinates.latitude,
+          longitud: coordinates.longitude,
+          radio: 15,  // Radio por defecto
+          source: coordinates.source,
+          note: 'Coordenadas del centro de la ciudad'
+        }
+      });
+    } else {
+      return res.json({
+        success: true,
+        exists: false,
+        found: false,
+        message: `No se encontraron coordenadas automáticamente para "${CIUDAD}"`,
+        data: {
+          nombre: CIUDAD,
+          latitud: null,
+          longitud: null,
+          radio: 15,
+          note: 'Por favor ingresa las coordenadas manualmente'
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error buscando coordenadas:', error);
+    return res.status(500).json({
+      error: 'Error al buscar coordenadas',
+      success: false,
       details: error.message
     });
   }
@@ -2209,6 +2311,7 @@ module.exports = {
   getCitiesByRegion,
   getCityByName,
   createCity,
+  getCityCoordinates,
   validateCityName,
   createAddress,
   deleteOOH,

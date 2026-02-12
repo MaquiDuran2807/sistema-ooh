@@ -277,14 +277,17 @@ const OOHForm = ({ onSuccess }) => {
   const handleAddCiudad = async (newCity) => {
     try {
       // Enviar al backend para guardar en BD
-      const response = await fetch('http://localhost:8080/api/ooh/cities/create', {
+      const response = await fetch('http://localhost:8080/api/ooh/cities', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           nombre: newCity.nombre,
-          region: newCity.region
+          region: newCity.region,
+          latitud: newCity.latitud,
+          longitud: newCity.longitud,
+          radio: newCity.radio
         })
       });
       
