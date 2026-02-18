@@ -7,6 +7,7 @@ const gcsService = require('../services/gcsService');
 const bigQueryService = require('../services/bigQueryService');
 const dbService = require('../services/dbService');
 const geoValidationService = require('../services/geoValidationService');
+const { validateRegion } = require('../utils/regionValidator');
 
 // Configurar modo de almacenamiento
 const USE_GCS = process.env.USE_GCS === 'true' || false;
@@ -1418,6 +1419,12 @@ const createCity = async (req, res) => {
       });
     }
     
+    // Validar región basada en coordenadas
+    const regionValidation = validateRegion(REGION, LAT, LON);
+    const regionWarning = !regionValidation.isValid 
+      ? `⚠️ ${regionValidation.message}` 
+      : null;
+    
     // Validar si la ciudad ya existe
     const validation = dbService.validateCityName(CIUDAD);
     if (!validation.isValid) {
@@ -1440,7 +1447,12 @@ const createCity = async (req, res) => {
       success: true,
       valid: true,
       message: `Ciudad "${CIUDAD}" creada exitosamente`,
-      data: newCity
+      data: newCity,
+      regionValidation: regionWarning ? {
+        warning: regionWarning,
+        suggestedRegion: regionValidation.suggested,
+        confidence: regionValidation.confidence
+      } : null
     });
     
   } catch (error) {
@@ -1515,6 +1527,105 @@ const getCityCoordinates = async (req, res) => {
     console.error('❌ Error buscando coordenadas:', error);
     return res.status(500).json({
       error: 'Error al buscar coordenadas',
+      success: false,
+      details: error.message
+    });
+  }
+};
+
+// Actualizar ciudad existente
+const updateCity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, region, latitud, longitud, radio } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        error: 'ID de ciudad requerido',
+        success: false
+      });
+    }
+
+    // Validar campos requeridos
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({
+        error: 'Nombre de ciudad requerido',
+        success: false
+      });
+    }
+
+    if (!region || !region.trim()) {
+      return res.status(400).json({
+        error: 'Región requerida',
+        success: false
+      });
+    }
+
+    if (latitud === undefined || latitud === null || latitud === '') {
+      return res.status(400).json({
+        error: 'Latitud requerida',
+        success: false
+      });
+    }
+
+    if (longitud === undefined || longitud === null || longitud === '') {
+      return res.status(400).json({
+        error: 'Longitud requerida',
+        success: false
+      });
+    }
+
+    if (radio === undefined || radio === null || radio === '') {
+      return res.status(400).json({
+        error: 'Radio requerido',
+        success: false
+      });
+    }
+
+    const CIUDAD = nombre.toUpperCase();
+    const REGION = region.toUpperCase();
+    const LAT = parseFloat(latitud);
+    const LON = parseFloat(longitud);
+    const RADIO = parseFloat(radio);
+
+    if (isNaN(LAT) || isNaN(LON) || isNaN(RADIO)) {
+      return res.status(400).json({
+        error: 'Coordenadas inválidas. Deben ser números',
+        success: false
+      });
+    }
+
+    // Validar región basada en coordenadas
+    const regionValidation = validateRegion(REGION, LAT, LON);
+    const regionWarning = !regionValidation.isValid 
+      ? `⚠️ ${regionValidation.message}` 
+      : null;
+
+    // Actualizar ciudad en BD
+    const updatedCity = dbService.updateCity(id, CIUDAD, REGION, LAT, LON, RADIO);
+    
+    if (!updatedCity) {
+      return res.status(404).json({
+        success: false,
+        error: 'Ciudad no encontrada'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Ciudad "${CIUDAD}" actualizada exitosamente`,
+      data: updatedCity,
+      regionValidation: regionWarning ? {
+        warning: regionWarning,
+        suggestedRegion: regionValidation.suggested,
+        confidence: regionValidation.confidence
+      } : null
+    });
+
+  } catch (error) {
+    console.error('❌ Error actualizando ciudad:', error);
+    return res.status(500).json({
+      error: 'Error al actualizar la ciudad',
       success: false,
       details: error.message
     });
@@ -1995,6 +2106,70 @@ const uploadRecordImages = async (req, res) => {
   }
 };
 
+// Subir imágenes con slots (posiciones) predefinidos
+const uploadRecordImagesWithSlots = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let slots = req.body.slots; // Puede venir como array o string individual
+    
+    // Convertir a array si es necesario
+    if (!Array.isArray(slots)) {
+      slots = [slots];
+    }
+    
+    // Convertir strings a números
+    slots = slots.map(s => parseInt(s));
+    
+    console.log('📤 [UPLOAD WITH SLOTS] Recibiendo imágenes con slots...');
+    console.log('📤 [UPLOAD WITH SLOTS] ID:', id);
+    console.log('📤 [UPLOAD WITH SLOTS] Files:', req.files?.length);
+    console.log('📤 [UPLOAD WITH SLOTS] Slots:', slots);
+    
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No se recibieron imágenes' });
+    }
+    if (!slots || slots.length !== req.files.length) {
+      return res.status(400).json({ error: 'Slots inválidos o no coinciden con el número de imágenes' });
+    }
+
+    const record = dbService.getRecordById(id);
+    if (!record) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+
+    const brandName = record.marca || 'GENERAL';
+    let uploadedUrls = [];
+
+    // Subir imágenes
+    if (USE_GCS) {
+      uploadedUrls = await gcsService.uploadToGCS(req.files, brandName, id);
+    } else {
+      uploadedUrls = await localStorageService.uploadToLocal(req.files, {
+        id,
+        marca: brandName,
+        campana: record.campana,
+        direccion: record.direccion,
+        fechaInicio: record.fecha_inicio
+      });
+    }
+
+    console.log('✅ [UPLOAD WITH SLOTS] URLs subidas:', uploadedUrls.length);
+
+    // Agregar imágenes a la BD con sus slots
+    const addedImages = dbService.addRecordImagesWithSlots(id, uploadedUrls, slots);
+    console.log('✅ [UPLOAD WITH SLOTS] Imágenes agregadas con slots:', addedImages.length);
+
+    // Obtener todas las imágenes del registro
+    const allImages = dbService.getRecordImages(id);
+
+    return res.status(201).json({ success: true, data: allImages });
+  } catch (error) {
+    console.error('❌ Error subiendo imágenes con slots:', error);
+    return res.status(500).json({ error: 'Error subiendo imágenes con slots' });
+  }
+};
+
 // Actualizar roles de imágenes (principal/secundaria/terciaria/galería)
 const setRecordImageRoles = async (req, res) => {
   try {
@@ -2311,6 +2486,7 @@ module.exports = {
   getCitiesByRegion,
   getCityByName,
   createCity,
+  updateCity,
   getCityCoordinates,
   validateCityName,
   createAddress,
@@ -2322,5 +2498,6 @@ module.exports = {
   createOOHState,
   getRecordImages,
   uploadRecordImages,
+  uploadRecordImagesWithSlots,
   setRecordImageRoles
 };

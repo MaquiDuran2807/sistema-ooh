@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import MapPicker from './MapPicker';
+import { findSimilar } from '../utils/fuzzyMatch';
 import './AddCiudadModal.css';
 
 const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
@@ -12,8 +13,24 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
   const [msgExiste, setMsgExiste] = useState('');
   const [loading, setLoading] = useState(false);
   const [coordSource, setCoordSource] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedCity, setSelectedCity] = useState(null); // Ciudad existente seleccionada
+  const [isUpdateMode, setIsUpdateMode] = useState(false);
 
   const regiones = ['CO Andes', 'CO Norte', 'CO Centro', 'CO Sur'];
+
+  // Buscar sugerencias mientras escribe
+  useEffect(() => {
+    if (nuevaCiudad.trim().length > 1 && ciudades && ciudades.length > 0) {
+      const matches = findSimilar(nuevaCiudad, ciudades, 0.4, 5);
+      setSuggestions(matches);
+      setShowSuggestions(matches.length > 0);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  }, [nuevaCiudad, ciudades]);
 
   // Auto-buscar coordenadas cuando cambia el nombre de ciudad
   useEffect(() => {
@@ -81,9 +98,24 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
     setError('');
   };
 
+  const handleSelectSuggestion = (suggestion) => {
+    const city = suggestion.item;
+    setSelectedCity(city);
+    setNuevaCiudad(city.nombre);
+    setNuevaRegion(city.region || '');
+    setLatitud(city.latitud?.toString() || '');
+    setLongitud(city.longitud?.toString() || '');
+    setRadio(city.radio_km?.toString() || '15');
+    setIsUpdateMode(true);
+    setShowSuggestions(false);
+    setCoordSource('existing');
+    setMsgExiste(`ℹ️ Actualizando ciudad existente: ${city.nombre}`);
+  };
+
   const handleAdd = () => {
-    if (msgExiste) {
-      setError('❌ Esta ciudad ya existe en la base de datos. No se puede crear duplicada.');
+    // Si es modo actualizar, no validar duplicados
+    if (!isUpdateMode && msgExiste && msgExiste.includes('ya existe')) {
+      setError('❌ Esta ciudad ya existe en la base de datos. Selecciona una sugerencia para actualizar.');
       return;
     }
 
@@ -114,7 +146,9 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
       region: nuevaRegion,
       latitud: latNum,
       longitud: lonNum,
-      radio: radNum
+      radio: radNum,
+      isUpdate: isUpdateMode,
+      cityId: selectedCity?.id || null
     });
 
     setNuevaCiudad('');
@@ -125,6 +159,10 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
     setError('');
     setMsgExiste('');
     setCoordSource('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSelectedCity(null);
+    setIsUpdateMode(false);
     
     // Cerrar modal después de guardar
     setTimeout(() => {
@@ -141,6 +179,10 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
     setError('');
     setMsgExiste('');
     setCoordSource('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSelectedCity(null);
+    setIsUpdateMode(false);
     onClose();
   };
 
@@ -177,11 +219,40 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
               onChange={(e) => {
                 setNuevaCiudad(e.target.value);
                 setError('');
+                setIsUpdateMode(false);
+                setSelectedCity(null);
               }}
               placeholder="Ej: MEDELLIN"
               maxLength="50"
               autoFocus
             />
+            
+            {/* Dropdown de sugerencias */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="suggestions-dropdown">
+                <div className="suggestions-header">
+                  💡 ¿Buscabas alguna de estas?
+                </div>
+                {suggestions.map((match, idx) => (
+                  <div
+                    key={idx}
+                    className="suggestion-item"
+                    onClick={() => handleSelectSuggestion(match)}
+                  >
+                    <div className="suggestion-name">
+                      {match.item.nombre}
+                      <span className="suggestion-region">({match.item.region})</span>
+                    </div>
+                    <div className="suggestion-score">
+                      {match.type === 'exact' && '✅ Exacta'}
+                      {match.type === 'starts-with' && '⭐ Empieza con'}
+                      {match.type === 'contains' && '🔍 Contiene'}
+                      {match.type === 'fuzzy' && `${Math.round(match.score * 100)}% similar`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="modal-form-group">
@@ -274,7 +345,7 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
               latitude={latitud}
               longitude={longitud}
               onLocationChange={handleMapLocationChange}
-              editable={!msgExiste}
+              editable={true}
               height="350px"
               zoom={12}
               showCoordinates={false}
@@ -292,8 +363,12 @@ const AddCiudadModal = ({ isOpen, onClose, onAdd, ciudades = [] }) => {
           <button className="btn-cancel" onClick={handleClose}>
             Cancelar
           </button>
-          <button className="btn-add" onClick={handleAdd} disabled={!!msgExiste || loading}>
-            {loading ? 'Buscando...' : 'Agregar Ciudad'}
+          <button 
+            className="btn-add" 
+            onClick={handleAdd} 
+            disabled={(msgExiste && msgExiste.includes('ya existe') && !isUpdateMode) || loading}
+          >
+            {loading ? 'Buscando...' : isUpdateMode ? '✏️ Actualizar Ciudad' : '➕ Agregar Ciudad'}
           </button>
         </div>
       </div>

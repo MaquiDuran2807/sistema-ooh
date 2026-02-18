@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
@@ -7,7 +7,7 @@ let cron = null;
 try {
   cron = require('node-cron');
 } catch (err) {
-  // console.warn('⚠️ node-cron no está disponible. Instala con: npm install node-cron');
+  // console.warn('âš ï¸ node-cron no estÃ¡ disponible. Instala con: npm install node-cron');
 }
 require('dotenv').config();
 
@@ -28,7 +28,7 @@ const corsOptions = {
     // Permitir requests sin origin (como Power Automate, Postman, etc)
     if (!origin) return callback(null, true);
     
-    // Lista de orígenes permitidos
+    // Lista de orÃ­genes permitidos
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:8080',
@@ -48,12 +48,12 @@ const corsOptions = {
     if (isAllowed) {
       callback(null, true);
     } else {
-      // console.log('⚠️ CORS bloqueado para origin:', origin);
+      // console.log('âš ï¸ CORS bloqueado para origin:', origin);
       callback(null, true); // En desarrollo, permitir todos por ahora
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 };
 
@@ -61,14 +61,25 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// ⚡ CONFIGURAR HEADERS DE CACHÉ PARA IMÁGENES
+app.use((req, res, next) => {
+  // Si es una petición de imagen (local o en rutas)
+  if (req.path.includes('/api/images/') || req.path.includes('local-images')) {
+    // Caché público por 30 días (máximo permitido)
+    res.set('Cache-Control', 'public, max-age=2592000, immutable');
+    res.set('Expires', new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toUTCString());
+    res.set('ETag', "");
+  }
+  next();
+});
 // Middleware para logging de todas las peticiones
 // Rutas
 app.use('/api/ooh', oohRoutes);
-app.use('/api/automation', excelAutomationRoutes);  // ← Nueva ruta para Power Automate
+app.use('/api/automation', excelAutomationRoutes);  // â† Nueva ruta para Power Automate
 
-// Servir imágenes locales (para desarrollo) - soporta subcarpetas
+// Servir imÃ¡genes locales (para desarrollo) - soporta subcarpetas
 app.get('/api/images/*', (req, res) => {
-  // Extraer la ruta completa después de /api/images/
+  // Extraer la ruta completa despuÃ©s de /api/images/
   const imagePath = req.params[0];
   localStorageService.serveImage(imagePath, res);
 });
@@ -94,12 +105,12 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Manejador global de excepciones no capturadas
 process.on('uncaughtException', (error) => {
-  console.error('Excepción no capturada:', error);
-  // El servidor continúa corriendo
+  console.error('ExcepciÃ³n no capturada:', error);
+  // El servidor continÃºa corriendo
 });
 
 const start = async () => {
-  // console.log(`✅ Servidor ejecutándose en puerto ${PORT}`);
+  // console.log(`âœ… Servidor ejecutÃ¡ndose en puerto ${PORT}`);
   // console.log(`   Frontend: http://localhost:3000`);
   // console.log(`   Backend: http://localhost:${PORT}`);
   // console.log(`   Health: http://localhost:${PORT}/health`);
@@ -109,7 +120,7 @@ const start = async () => {
     await dbService.initDB();
 
   } catch (error) {
-    console.error('❌ Error inicializando BD:', error);
+    console.error('âŒ Error inicializando BD:', error);
   }
 
   const triggerBigQuerySync = (reason = 'manual') => {
@@ -123,36 +134,36 @@ const start = async () => {
         let body = '';
         res.on('data', chunk => { body += chunk; });
         res.on('end', () => {
-          // console.log(`📊 [BIGQUERY SYNC] (${reason}) Status: ${res.statusCode}`);
+          // console.log(`ðŸ“Š [BIGQUERY SYNC] (${reason}) Status: ${res.statusCode}`);
           if (body) {
-            // console.log(`📊 [BIGQUERY SYNC] (${reason}) Response: ${body.substring(0, 200)}`);
+            // console.log(`ðŸ“Š [BIGQUERY SYNC] (${reason}) Response: ${body.substring(0, 200)}`);
           }
           resolve();
         });
       });
       req.on('error', (err) => {
-        console.error(`❌ [BIGQUERY SYNC] (${reason}) Error:`, err.message);
+        console.error(`âŒ [BIGQUERY SYNC] (${reason}) Error:`, err.message);
         reject(err);
       });
       req.end();
     });
   };
 
-  // Programar sincronización diaria (si está habilitada)
+  // Programar sincronizaciÃ³n diaria (si estÃ¡ habilitada)
   if (USE_BIGQUERY && BIGQUERY_DAILY_SYNC) {
     if (!cron) {
-      // console.warn('⚠️ BigQuery sync diario no se programó: node-cron no está instalado');
+      // console.warn('âš ï¸ BigQuery sync diario no se programÃ³: node-cron no estÃ¡ instalado');
     } else if (cron.validate(BIGQUERY_SYNC_CRON)) {
       cron.schedule(BIGQUERY_SYNC_CRON, () => {
-        // console.log(`🕒 [BIGQUERY SYNC] Ejecutando sync programado (${BIGQUERY_SYNC_CRON})`);
+        // console.log(`ðŸ•’ [BIGQUERY SYNC] Ejecutando sync programado (${BIGQUERY_SYNC_CRON})`);
         triggerBigQuerySync('cron').catch(() => {});
       });
-      // console.log(`🕒 BigQuery sync diario programado: ${BIGQUERY_SYNC_CRON}`);
+      // console.log(`ðŸ•’ BigQuery sync diario programado: ${BIGQUERY_SYNC_CRON}`);
     } else {
-      // console.warn(`⚠️ BIGQUERY_SYNC_CRON inválido: ${BIGQUERY_SYNC_CRON}`);
+      // console.warn(`âš ï¸ BIGQUERY_SYNC_CRON invÃ¡lido: ${BIGQUERY_SYNC_CRON}`);
     }
   } else if (USE_BIGQUERY) {
-    // console.log('🕒 BigQuery sync diario desactivado (BIGQUERY_DAILY_SYNC=false)');
+    // console.log('ðŸ•’ BigQuery sync diario desactivado (BIGQUERY_DAILY_SYNC=false)');
   }
 };
 
@@ -161,3 +172,4 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 module.exports = { app, start };
+

@@ -276,9 +276,16 @@ const OOHForm = ({ onSuccess }) => {
 
   const handleAddCiudad = async (newCity) => {
     try {
-      // Enviar al backend para guardar en BD
-      const response = await fetch('http://localhost:8080/api/ooh/cities', {
-        method: 'POST',
+      const isUpdate = newCity.isUpdate && newCity.cityId;
+      const url = isUpdate 
+        ? `http://localhost:8080/api/ooh/cities/${newCity.cityId}`
+        : 'http://localhost:8080/api/ooh/cities';
+      
+      const method = isUpdate ? 'PUT' : 'POST';
+      
+      // Enviar al backend para guardar/actualizar en BD
+      const response = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json'
         },
@@ -294,28 +301,36 @@ const OOHForm = ({ onSuccess }) => {
       const result = await response.json();
       
       if (!response.ok || !result.success) {
-        console.error('❌ Error al crear ciudad:', result.error || result.message);
+        console.error(`❌ Error al ${isUpdate ? 'actualizar' : 'crear'} ciudad:`, result.error || result.message);
         alert(`Error: ${result.error || result.message}`);
         return;
       }
       
       // Si fue exitoso, actualizar el estado
-      const newCityData = result.data;
+      const cityData = result.data;
       
-      // Actualizar estado
-      setAvailableCities(prev => [...(prev || []), newCityData]);
+      if (isUpdate) {
+        // Actualizar ciudad existente en el array
+        setAvailableCities(prev => 
+          prev.map(city => city.id === newCity.cityId ? cityData : city)
+        );
+      } else {
+        // Agregar nueva ciudad al array
+        setAvailableCities(prev => [...(prev || []), cityData]);
+      }
+      
       setFormData(prev => ({
         ...prev,
         ciudad: newCity.nombre,
         region: newCity.region
       }));
       
-      console.log(`✅ Ciudad agregada exitosamente: ${newCity.nombre}`);
+      console.log(`✅ Ciudad ${isUpdate ? 'actualizada' : 'agregada'} exitosamente: ${newCity.nombre}`);
       setShowAddCiudadModal(false);
       
     } catch (error) {
-      console.error('❌ Error de conexión al crear ciudad:', error);
-      alert('Error de conexión: No se puede crear la ciudad');
+      console.error('❌ Error de conexión al procesar ciudad:', error);
+      alert('Error de conexión: No se puede procesar la ciudad');
     }
   };
 

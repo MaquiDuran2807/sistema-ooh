@@ -1054,6 +1054,39 @@ const getRecordImages = (recordId) => {
 const addRecordImages = (recordId, imageUrls = []) => {
   if (!db || !recordId || imageUrls.length === 0) return [];
 
+  // Obtener el máximo orden actual
+  const maxStmt = db.prepare('SELECT COALESCE(MAX(orden), 0) as maxOrden FROM images WHERE ooh_record_id = ?');
+  maxStmt.bind([recordId]);
+  maxStmt.step();
+  let maxOrden = maxStmt.getAsObject().maxOrden || 0;
+  maxStmt.free();
+
+  // Generar órdenes aleatorios para las imágenes de galería
+  const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden, role, slot) VALUES (?, ?, ?, ?, ?)');
+  imageUrls.forEach((url, idx) => {
+    // Orden aleatorio entre 100 y 999 para distinguirlas de las primary (1-3)
+    const randomOrden = Math.floor(Math.random() * 900) + 100 + maxOrden;
+    console.log(`📋 [DB] Asignando orden aleatorio ${randomOrden} a imagen de galería`);
+    insertImg.bind([recordId, url, randomOrden, 'gallery', null]);
+    insertImg.step();
+    insertImg.reset();
+    maxOrden = randomOrden; // Actualizar para evitar duplicados
+  });
+  insertImg.free();
+  saveDB();
+  return getRecordImages(recordId);
+};
+
+// Agregar imágenes con slots (posiciones) predefinidos
+const addRecordImagesWithSlots = (recordId, imageUrls = [], slots = []) => {
+  if (!db || !recordId || imageUrls.length === 0) return [];
+  if (slots.length !== imageUrls.length) {
+    console.error('❌ [addRecordImagesWithSlots] Número de slots no coincide con número de URLs');
+    return [];
+  }
+
+  console.log('📝 [addRecordImagesWithSlots] Agregando imágenes con slots:', { recordId, count: imageUrls.length });
+
   const maxStmt = db.prepare('SELECT COALESCE(MAX(orden), 0) as maxOrden FROM images WHERE ooh_record_id = ?');
   maxStmt.bind([recordId]);
   maxStmt.step();
@@ -1063,12 +1096,16 @@ const addRecordImages = (recordId, imageUrls = []) => {
   const insertImg = db.prepare('INSERT INTO images (ooh_record_id, ruta, orden, role, slot) VALUES (?, ?, ?, ?, ?)');
   imageUrls.forEach((url, idx) => {
     const orden = maxOrden + idx + 1;
-    insertImg.bind([recordId, url, orden, 'gallery', null]);
+    const slot = parseInt(slots[idx]);
+    console.log(`  ✅ Imagen ${idx + 1}: slot=${slot}, orden=${orden}`);
+    insertImg.bind([recordId, url, orden, 'primary', slot]);
     insertImg.step();
     insertImg.reset();
   });
   insertImg.free();
+
   saveDB();
+  console.log('✅ [addRecordImagesWithSlots] Imágenes agregadas y sincronizadas');
   return getRecordImages(recordId);
 };
 
@@ -1099,35 +1136,6 @@ const setRecordImageRoles = (recordId, selections = []) => {
     updateStmt.reset();
   });
   updateStmt.free();
-
-  // Sincronizar imagen_1..3
-  const primaryStmt = db.prepare(`
-    SELECT ruta, slot
-    FROM images
-    WHERE ooh_record_id = ? AND role = 'primary'
-    ORDER BY slot ASC
-  `);
-  primaryStmt.bind([recordId]);
-
-  const primaryImages = [];
-  while (primaryStmt.step()) {
-    const row = primaryStmt.getAsObject();
-    primaryImages.push(row.ruta);
-  }
-  primaryStmt.free();
-
-  const img1 = primaryImages[0] || '';
-  const img2 = primaryImages[1] || '';
-  const img3 = primaryImages[2] || '';
-
-  const updateRecordStmt = db.prepare(`
-    UPDATE ooh_records
-    SET imagen_1 = ?, imagen_2 = ?, imagen_3 = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-  updateRecordStmt.bind([img1, img2, img3, recordId]);
-  updateRecordStmt.step();
-  updateRecordStmt.free();
 
   saveDB();
 };
@@ -1576,7 +1584,7 @@ const addCity = (nombre, region, latitud = null, longitud = null, radio = null) 
   // Usar valores por defecto si no se proporcionan coordenadas
   const LAT = latitud !== null && latitud !== undefined ? parseFloat(latitud) : 0;
   const LON = longitud !== null && longitud !== undefined ? parseFloat(longitud) : 0;
-  const RADIO = radio !== null && radio !== undefined ? parseFloat(radio) : 15;
+  const RADIO = radio !== null && radio !== undefined ? parseFloat(radio) : 5;
   
   // Insertar la ciudad
   const stmt = db.prepare(`
@@ -1591,6 +1599,44 @@ const addCity = (nombre, region, latitud = null, longitud = null, radio = null) 
   
   // Retornar la ciudad creada
   return getCityByName(nombre);
+};
+
+const updateCity = (id, nombre, region, latitud, longitud, radio) => {
+  if (!db) return null;
+  
+  // Obtener el ID de la región
+  const regionStmt = db.prepare('SELECT id FROM regions WHERE UPPER(nombre) = ?');
+  regionStmt.bind([region.toUpperCase()]);
+  let regionId = null;
+  if (regionStmt.step()) {
+    const regionResult = regionStmt.getAsObject();
+    regionId = regionResult.id;
+  }
+  regionStmt.free();
+  
+  if (!regionId) {
+    throw new Error(`Región "${region}" no encontrada en la base de datos`);
+  }
+  
+  // Validar valores de coordenadas
+  const LAT = parseFloat(latitud);
+  const LON = parseFloat(longitud);
+  const RADIO = parseFloat(radio);
+  
+  // Actualizar la ciudad
+  const stmt = db.prepare(`
+    UPDATE cities 
+    SET nombre = ?, region_id = ?, latitud = ?, longitud = ?, radio_km = ?
+    WHERE id = ?
+  `);
+  stmt.bind([nombre.toUpperCase(), regionId, LAT, LON, RADIO, id]);
+  stmt.step();
+  stmt.free();
+  
+  saveDB();
+  
+  // Retornar la ciudad actualizada
+  return getCityById(id);
 };
 
 // Obtener marca por nombre (para mapeo frontend)
@@ -1903,6 +1949,7 @@ module.exports = {
   validateCityName,
   getCityNameVariations,
   addCity,
+  updateCity,
   // Funciones de estados OOH
   getAllOOHStates,
   getOOHStateById,
@@ -1911,6 +1958,7 @@ module.exports = {
   // Funciones de imágenes
   getRecordImages,
   addRecordImages,
+  addRecordImagesWithSlots,
   setRecordImageRoles,
   // Funciones de geocodificación
   getCoordinates,

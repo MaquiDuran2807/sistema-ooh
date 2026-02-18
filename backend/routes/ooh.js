@@ -69,6 +69,9 @@ router.get('/cities/by-name', oohController.getCityByName);
 // POST - Crear nueva ciudad
 router.post('/cities', oohController.createCity);
 
+// PUT - Actualizar ciudad existente
+router.put('/cities/:id', oohController.updateCity);
+
 // POST - Validar nombre de ciudad (detectar duplicados)
 router.post('/cities/validate', oohController.validateCityName);
 
@@ -113,6 +116,9 @@ router.get('/:id/images', oohController.getRecordImages);
 
 // POST - Subir imágenes adicionales a un registro
 router.post('/:id/images/upload', upload.array('imagenes', 25), oohController.uploadRecordImages);
+
+// POST - Subir imágenes con slots (posiciones) predefinidos
+router.post('/:id/images/upload-with-slots', upload.array('imagenes', 25), oohController.uploadRecordImagesWithSlots);
 
 // PATCH - Actualizar roles de imágenes (principal/secundaria/terciaria)
 router.patch('/:id/images/roles', oohController.setRecordImageRoles);
