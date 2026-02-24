@@ -3,12 +3,12 @@ import './AddCampanaModal.css';
 import { useApp } from '../context/AppContext';
 import AddMarcaModal from './AddMarcaModal';
 
-const AddCampanaModal = ({ isOpen, onClose, onAdd, brands = [] }) => {
+const AddCampanaModal = ({ isOpen, onClose, onAdd, brands = [], preselectedBrandId = null }) => {
   const { categories = [], advertisers = [] } = useApp();
   
   const [formData, setFormData] = useState({
     nombre: '',
-    brand_id: ''
+    brand_id: preselectedBrandId || ''
   });
   const [showAddMarcaModal, setShowAddMarcaModal] = useState(false);
   const [availableBrands, setAvailableBrands] = useState(brands);
@@ -69,11 +69,18 @@ const AddCampanaModal = ({ isOpen, onClose, onAdd, brands = [] }) => {
   const handleClose = () => {
     setFormData({
       nombre: '',
-      brand_id: ''
+      brand_id: preselectedBrandId || ''
     });
     setError('');
     onClose();
   };
+
+  // Cuando cambia preselectedBrandId, actualizar formData
+  React.useEffect(() => {
+    if (preselectedBrandId) {
+      setFormData(prev => ({ ...prev, brand_id: preselectedBrandId }));
+    }
+  }, [preselectedBrandId]);
 
   if (!isOpen) return null;
 
@@ -97,7 +104,9 @@ const AddCampanaModal = ({ isOpen, onClose, onAdd, brands = [] }) => {
                   name="brand_id"
                   value={formData.brand_id}
                   onChange={handleChange}
+                  disabled={!!preselectedBrandId}
                   required
+                  style={preselectedBrandId ? { backgroundColor: '#f5f5f5', cursor: 'not-allowed' } : {}}
                 >
                   <option value="">-- Seleccionar marca --</option>
                   {(availableBrands || []).map(brand => (
@@ -106,17 +115,22 @@ const AddCampanaModal = ({ isOpen, onClose, onAdd, brands = [] }) => {
                     </option>
                   ))}
                 </select>
-                <button 
-                  type="button"
-                  className="btn-add-small"
-                  onClick={() => setShowAddMarcaModal(true)}
-                  title="Crear nueva marca"
-                >
-                  +
-                </button>
+                {!preselectedBrandId && (
+                  <button 
+                    type="button"
+                    className="btn-add-small"
+                    onClick={() => setShowAddMarcaModal(true)}
+                    title="Crear nueva marca"
+                  >
+                    +
+                  </button>
+                )}
               </div>
               <small style={{ display: 'block', marginTop: '6px', color: '#666' }}>
-                No ves la marca? Crea una nueva haciendo click en "+"
+                {preselectedBrandId 
+                  ? 'La marca está pre-seleccionada y no se puede cambiar' 
+                  : 'No ves la marca? Crea una nueva haciendo click en "+"'
+                }
               </small>
             </div>
 

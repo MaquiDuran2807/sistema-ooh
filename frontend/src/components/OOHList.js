@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import axios from 'axios';
 import './OOHList.css';
-import { useApp } from '../context/AppContext';
-import dbService from '../services/dbService';
-import RecordCard from './RecordCard';
 import RecordTableView from './RecordTableView';
 import RecordCardsView from './RecordCardsView';
 import MapPicker from './MapPicker';
-import { cacheRecordImages, getCachedImages, invalidateCache } from '../utils/imageCache';
+import AddCampanaModal from './AddCampanaModal';
+import { deleteRecord, downloadReportPPT, fetchAvailablePeriods, fetchRecords, updateRecordCheck } from '../services/oohService';
+import { useOOHEditModal } from '../hooks/useOOHEditModal';
+import { useOOHImages } from '../hooks/useOOHImages';
+import { useApp } from '../context/AppContext';
 
 const OOHList = ({ refreshTrigger }) => {
   const PAGE_SIZE = 30;
   const PREFETCH_MARGIN_PX = 6000; // Cargar mucho antes de llegar al final
+
+  // Obtener datos del contexto global
+  const { brands, campaigns, createCampaign } = useApp();
 
   const LazyImage = ({ src, alt, className, placeholder, onError }) => {
     const imgRef = useRef(null);
@@ -51,13 +54,7 @@ const OOHList = ({ refreshTrigger }) => {
     );
   };
 
-  const { 
-    brands,
-    campaigns: campaignsList,
-    cities: citiesList,
-    oohTypes: oohTypesList,
-    providers: providersList
-  } = useApp();
+  // 🚫 Variables del contexto no usadas en este componente (se usan en RecordTableView/RecordCardsView via props)
   
   // 🔧 ESTADO LOCAL: No usar el contexto global para paginación
   const [records, setRecords] = useState([]);
@@ -109,9 +106,9 @@ const OOHList = ({ refreshTrigger }) => {
   useEffect(() => {
     const loadPeriods = async () => {
       try {
-        const res = await axios.get('http://localhost:8080/api/ooh/periods/available');
-        if (res.data.success) {
-          setAvailablePeriods(res.data.data);
+        const res = await fetchAvailablePeriods();
+        if (res.success) {
+          setAvailablePeriods(res.data);
           
           // Usar siempre la fecha actual del sistema como filtro por defecto
           const now = new Date();
@@ -119,14 +116,14 @@ const OOHList = ({ refreshTrigger }) => {
           let defaultMonth = String(now.getMonth() + 1).padStart(2, '0');
           
           // Validar que el año existe en la BD
-          const yearsAvailable = res.data.data.years.map(String);
+          const yearsAvailable = res.data.years.map(String);
           if (!yearsAvailable.includes(defaultYear)) {
             // Si el año actual no existe, usar el primer año disponible
             defaultYear = yearsAvailable[0] || '';
           }
           
           // Validar que el mes existe para el año seleccionado
-          const monthsForYear = res.data.data.periodsByYear[defaultYear] || [];
+          const monthsForYear = res.data.periodsByYear[defaultYear] || [];
           if (!monthsForYear.includes(defaultMonth)) {
             // Si el mes actual no existe, usar el primer mes disponible del año
             defaultMonth = monthsForYear[0] || '';
@@ -161,23 +158,6 @@ const OOHList = ({ refreshTrigger }) => {
     }
   }, [filterAno, filterMes, availablePeriods.periodsByYear]);
   
-  // Modal de detalles
-  const [showModal, setShowModal] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState(null);
-  const [editMode, setEditMode] = useState(false);
-  const [editData, setEditData] = useState({});
-  const [isSyncingBQ, setIsSyncingBQ] = useState(false);
-  const [syncStatus, setSyncStatus] = useState({});
-  const [imageReplacements, setImageReplacements] = useState({});
-  const [showImagesModal, setShowImagesModal] = useState(false);
-  const [recordImages, setRecordImages] = useState([]);
-  const [imagesLoading, setImagesLoading] = useState(false);
-  const [imagesError, setImagesError] = useState(null);
-  const [imagesUploading, setImagesUploading] = useState(false);
-  const [cachedImages, setCachedImages] = useState([]); // Array of {id, file, preview}
-  const [boxAssignments, setBoxAssignments] = useState({ 1: null, 2: null, 3: null }); // slot -> cachedImageId
-  const [isDraggingOverDropZone, setIsDraggingOverDropZone] = useState(false);
-  
   // Selección múltiple de tarjetas
   const [selectedCards, setSelectedCards] = useState(new Set());
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
@@ -201,262 +181,72 @@ const OOHList = ({ refreshTrigger }) => {
     );
   }, [setRecords]);
 
-  const getMaxPrimaryCount = useCallback((record) => {
-    if (!record) return 3;
-    const tipo = String(record.tipo_ooh || '').toUpperCase();
-    if (tipo.includes('CAJA') || tipo.includes('LUZ')) return 12;
-    return 3;
-  }, []);
+  // 🔧 CUSTOM HOOKS: Modal de edición y gestión de imágenes  
+  // Se define handleRefresh después de loadPage, así que se pasa como ref
+  let loadPageRef = useRef();
 
-  const openImagesModal = useCallback(async () => {
-    if (!selectedRecord) return;
-    setShowImagesModal(true);
-    setImagesLoading(true);
-    setImagesError(null);
-    
-    // Limpiar caché al abrir
-    cachedImages.forEach(img => URL.revokeObjectURL(img.preview));
-    setCachedImages([]);
-    setBoxAssignments({ 1: null, 2: null, 3: null });
-    
-    // Cargar imágenes existentes (lazy loading con caché)
-    const cached = getCachedImages(selectedRecord.id);
-    if (cached) {
-      console.log('✅ [CACHE] Imágenes cargadas desde caché:', cached.length);
-      setRecordImages(cached);
-      setImagesLoading(false);
-      return;
+  const editModalHook = useOOHEditModal({
+    onRefresh: () => {
+      pageRef.current = 1;
+      loadPageRef.current && loadPageRef.current(1, false);
     }
-    
-    try {
-      const res = await axios.get(`http://localhost:8080/api/ooh/${selectedRecord.id}/images`);
-      const images = Array.isArray(res.data?.data) ? res.data.data : [];
-      setRecordImages(images);
-      cacheRecordImages(selectedRecord.id, images);
-      console.log('💾 [CACHE] Imágenes guardadas en caché:', images.length);
-    } catch (err) {
-      setImagesError(err.response?.data?.error || err.message || 'Error cargando imágenes');
-    } finally {
-      setImagesLoading(false);
-    }
-  }, [selectedRecord, cachedImages]);
+  });
 
-  // Drag & Drop para cargar imágenes al caché
-  const handleDragOverDropZone = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOverDropZone(true);
-  };
-
-  const handleDragLeaveDropZone = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.currentTarget === e.target) {
-      setIsDraggingOverDropZone(false);
-    }
-  };
-
-  const handleDropImages = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOverDropZone(false);
-
-    if (!selectedRecord) return;
-
-    const items = e.dataTransfer.items;
-    const files = [];
-
-    // Función recursiva para leer carpetas
-    const readDirectory = async (dirReader) => {
-      return new Promise((resolve) => {
-        const entries = [];
-        const readEntries = () => {
-          dirReader.readEntries(async (results) => {
-            if (results.length === 0) {
-              resolve(entries);
-            } else {
-              for (const entry of results) {
-                entries.push(entry);
-              }
-              readEntries();
-            }
-          });
-        };
-        readEntries();
-      });
-    };
-
-    const processEntry = async (entry) => {
-      if (entry.isFile) {
-        return new Promise((resolve) => {
-          entry.file((file) => {
-            if (file.type.startsWith('image/')) {
-              files.push(file);
-              console.log(`📤 [DROP] Archivo: ${file.name}`);
-            }
-            resolve();
-          });
-        });
-      } else if (entry.isDirectory) {
-        console.log(`📤 [DROP] Carpeta: ${entry.name}`);
-        const dirReader = entry.createReader();
-        const entries = await readDirectory(dirReader);
-        for (const subEntry of entries) {
-          await processEntry(subEntry);
-        }
-      }
-    };
-
-    // Procesar items
-    if (items && items.length > 0) {
-      const promises = [];
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.kind === 'file') {
-          const entry = item.webkitGetAsEntry();
-          if (entry) {
-            promises.push(processEntry(entry));
-          }
-        }
-      }
-      await Promise.all(promises);
-    } else {
-      const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-      files.push(...droppedFiles);
-    }
-
-    // Agregar al caché
-    if (files.length > 0) {
-      console.log(`✅ [DROP] ${files.length} imagen(es) cargadas al caché`);
-      const newImages = Array.from(files).map((file, idx) => ({
-        id: `cache_${Date.now()}_${idx}`,
-        file,
-        preview: URL.createObjectURL(file)
-      }));
-
-      setCachedImages(prev => [...prev, ...newImages]);
-      setImagesError(`✅ ${files.length} imagen(es) en caché. Asigna las 3 principales a los boxes de arriba.`);
-      setTimeout(() => setImagesError(null), 4000);
-    }
-  };
-
-  // Asignar imagen del caché a un box (slot 1, 2, o 3)
-  const assignImageToBox = (slot, cachedImageId) => {
-    setBoxAssignments(prev => ({
-      ...prev,
-      [slot]: cachedImageId === prev[slot] ? null : cachedImageId // Toggle
-    }));
-    console.log(`📌 [ASSIGN] Imagen ${cachedImageId} asignada a slot ${slot}`);
-  };
-
-  // Obtener imagen asignada a un slot
-  const getAssignedImage = (slot) => {
-    const imageId = boxAssignments[slot];
-    if (!imageId) return null;
-    return cachedImages.find(img => img.id === imageId);
-  };
-
-  // Guardar todas las imágenes
-  const handleSaveAllImages = async () => {
-    if (!selectedRecord) return;
-
-    console.log('💾 [SAVE] Guardando imágenes...');
-    console.log('💾 [SAVE] Box assignments:', boxAssignments);
-    console.log('💾 [SAVE] Cached images:', cachedImages.length);
-
-    setImagesUploading(true);
-    setImagesError(null);
-
-    try {
-      // PASO 1: Preparar imágenes para subir
-      const imagesToUpload = [];
-      let galleryOrder = 4;
-      cachedImages.forEach(img => {
-        const slot = Object.entries(boxAssignments).find(([_, id]) => id === img.id)?.[0];
-        if (slot) {
-          imagesToUpload.push({
-            file: img.file,
-            slot: parseInt(slot),
-            name: img.file.name
-          });
-        } else {
-          imagesToUpload.push({
-            file: img.file,
-            slot: undefined,
-            order: galleryOrder++,
-            name: img.file.name
-          });
-        }
-      });
-
-      console.log('📤 [SAVE] Imágenes a subir:', imagesToUpload);
-
-      // PASO 2: Subir imágenes primary (slots 1, 2, 3)
-      const primaryImages = imagesToUpload.filter(img => img.slot);
-      if (primaryImages.length > 0) {
-        const formData = new FormData();
-        primaryImages.forEach(img => {
-          formData.append('imagenes', img.file);
-          formData.append('slots', img.slot); // Enviar slot para cada imagen
-          console.log(`📤 [SAVE] PRIMARY: ${img.file.name} → Slot ${img.slot}`);
-        });
-
-        await axios.post(`http://localhost:8080/api/ooh/${selectedRecord.id}/images/upload-with-slots`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        console.log('✅ [SAVE] PRIMARY imágenes subidas');
-      }
-
-      // PASO 3: Subir imágenes gallery (resto)
-      const galleryImages = imagesToUpload.filter(img => !img.slot);
-      if (galleryImages.length > 0) {
-        const formData = new FormData();
-        galleryImages.forEach(img => {
-          formData.append('imagenes', img.file);
-          console.log(`📤 [SAVE] GALLERY: ${img.file.name}`);
-        });
-
-        await axios.post(`http://localhost:8080/api/ooh/${selectedRecord.id}/images/upload`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        console.log('✅ [SAVE] GALLERY imágenes subidas');
-      }
-
-      // PASO 4: Invalidar cache y recargar
-      invalidateCache(selectedRecord.id);
-      const res = await axios.get(`http://localhost:8080/api/ooh/${selectedRecord.id}/images`);
-      const images = Array.isArray(res.data?.data) ? res.data.data : [];
-      setRecordImages(images);
-      cacheRecordImages(selectedRecord.id, images);
-
-      // PASO 5: Actualizar imagen_1 en registro
-      const primaryImg = images.find(img => img.role === 'primary' && img.slot === 1);
-      const updatedRecord = {
-        ...selectedRecord,
-        imagen_1: primaryImg?.ruta || selectedRecord.imagen_1,
-        imagen_2: images.find(img => img.role === 'primary' && img.slot === 2)?.ruta || selectedRecord.imagen_2,
-        imagen_3: images.find(img => img.role === 'primary' && img.slot === 3)?.ruta || selectedRecord.imagen_3
-      };
-
-      setSelectedRecord(updatedRecord);
+  const imagesHook = useOOHImages({
+    selectedRecord: editModalHook.selectedRecord,
+    onUpdateRecord: (updatedRecord) => {
+      editModalHook.setSelectedRecord(updatedRecord);
       setRecords(prevRecords =>
-        prevRecords.map(r => r.id === selectedRecord.id ? updatedRecord : r)
+        prevRecords.map(r => r.id === updatedRecord.id ? updatedRecord : r)
       );
-
-      // PASO 6: Limpiar caché
-      cachedImages.forEach(img => URL.revokeObjectURL(img.preview));
-      setCachedImages([]);
-      setBoxAssignments({ 1: null, 2: null, 3: null });
-
-      setImagesError('✅ Imágenes guardadas correctamente. Tarjetas actualizadas.');
-      setTimeout(() => setImagesError(null), 4000);
-    } catch (err) {
-      console.error('❌ [SAVE] Error:', err);
-      setImagesError('❌ ' + (err.response?.data?.error || err.message || 'Error guardando'));
-    } finally {
-      setImagesUploading(false);
     }
-  };
+  });
+
+  // Desestructurar funciones y variables de los hooks para uso directo
+  const {
+    showModal,
+    selectedRecord,
+    setSelectedRecord,
+    editMode,
+    setEditMode,
+    editData,
+    imageReplacements,
+    setImageReplacements,
+    isSyncingBQ,
+    syncStatus,
+    showAddCampanaModal,
+    openModal: openModalFromHook,
+    closeModal,
+    handleEditChange,
+    handleImageChangeSlot,
+    saveChanges,
+    syncToBigQuery,
+    openAddCampanaModal,
+    closeAddCampanaModal,
+    handleNewCampaignAdded
+  } = editModalHook;
+
+  const {
+    showImagesModal,
+    setShowImagesModal,
+    recordImages,
+    imagesLoading,
+    imagesError,
+    setImagesError,
+    imagesUploading,
+    cachedImages,
+    boxAssignments,
+    isDraggingOverDropZone,
+    openImagesModal,
+    handleDragOverDropZone,
+    handleDragLeaveDropZone,
+    handleDropImages,
+    assignImageToBox,
+    getAssignedImage,
+    handleSaveAllImages
+  } = imagesHook;
+
+  const openModal = openModalFromHook; // Alias para compatibilidad
 
   // Manejar el toggle de check en tabla
   const handleCheckInTable = useCallback(async (e, recordId, currentCheckedState) => {
@@ -464,11 +254,8 @@ const OOHList = ({ refreshTrigger }) => {
     setCheckingStates(prev => ({ ...prev, [recordId]: true }));
     try {
       const newCheckedState = !currentCheckedState;
-      const response = await axios.patch(
-        `http://localhost:8080/api/ooh/${recordId}/check`,
-        { checked: newCheckedState }
-      );
-      if (response.data.success) {
+      const response = await updateRecordCheck(recordId, newCheckedState);
+      if (response.success) {
         handleCheckedChange(recordId, newCheckedState);
       }
     } catch (error) {
@@ -535,12 +322,12 @@ const OOHList = ({ refreshTrigger }) => {
         params.ano = options.ano;
       }
       // console.log(`📄 [LOCAL FETCH] Cargando registros: page=${page}, limit=${limit}`);
-      const res = await axios.get('http://localhost:8080/api/ooh/all', { params });
-      if (res.data.success) {
+      const res = await fetchRecords(params);
+      if (res.success) {
         const append = options.append === true;
         setRecords(prev => {
-          if (!append) return res.data.data;
-          const combined = [...prev, ...res.data.data];
+          if (!append) return res.data;
+          const combined = [...prev, ...res.data];
           const seen = new Set();
           return combined.filter(item => {
             if (!item?.id) return false;
@@ -549,12 +336,12 @@ const OOHList = ({ refreshTrigger }) => {
             return true;
           });
         });
-        if (res.data.pagination) {
-          setRecordsPagination(res.data.pagination);
+        if (res.pagination) {
+          setRecordsPagination(res.pagination);
         }
         return {
-          data: res.data.data,
-          pagination: res.data.pagination
+          data: res.data,
+          pagination: res.pagination
         };
       }
     } catch (error) {
@@ -590,6 +377,9 @@ const OOHList = ({ refreshTrigger }) => {
       setIsFetchingMore(false);
     }
   }, [fetchRecordsLocal, filterAno, filterMes]);
+
+  // Asignar loadPage al ref para uso en hooks
+  loadPageRef.current = loadPage;
 
   useEffect(() => {
     if (!filtersReady) return;
@@ -837,7 +627,7 @@ const OOHList = ({ refreshTrigger }) => {
     setShowReportModal(false);
   };
 
-  const downloadReportPPT = async () => {
+  const downloadReportPPTHandler = async () => {
     if (!reportMonth) {
       alert('⚠️ Por favor selecciona un mes');
       return;
@@ -845,16 +635,9 @@ const OOHList = ({ refreshTrigger }) => {
 
     try {
       setIsDownloading(true);
-      // console.log(`📥 Descargando PPT de VAYAS para ${reportMonth}...`);
-      // console.log(`   Método: ${reportMethod === 'base' ? 'Con archivo base (Python)' : 'Desde cero (PptxGenJS)'}`);
-      
-      const response = await axios.get('http://localhost:8080/api/ooh/report/ppt', {
-        params: { 
-          month: reportMonth,
-          useBase: reportMethod === 'base' ? 'true' : 'false'
-        },
-        responseType: 'blob',
-        timeout: 60000 // 60 segundos de timeout
+      const response = await downloadReportPPT({ 
+        month: reportMonth,
+        useBase: reportMethod === 'base' ? 'true' : 'false'
       });
       
       // Crear un link y descargar
@@ -888,89 +671,7 @@ const OOHList = ({ refreshTrigger }) => {
     }
   };
 
-  const openModal = (record) => {
-    console.log('🔍 [MODAL] Abriendo modal con registro:', record);
-    setSelectedRecord(record);
-    setEditData({
-      id: record.id,
-      // Guardar nombres para mostrar
-      marca: record.marca,
-      categoria: record.categoria,
-      proveedor: record.proveedor,
-      campana: record.campana,
-      direccion: record.direccion,
-      ciudad: record.ciudad,
-      region: record.ciudad_region || record.region,
-      latitud: record.latitud,
-      longitud: record.longitud,
-      fechaInicio: record.fecha_inicio,
-      fechaFin: record.fecha_final,
-      tipoOOH: record.tipo_ooh,
-      // ✅ NUEVO: Guardar IDs originales del registro
-      brand_id: record.brand_id,
-      campaign_id: record.campaign_id,
-      ooh_type_id: record.ooh_type_id,
-      provider_id: record.provider_id,
-      city_id: record.city_id
-    });
-    console.log('🔍 [MODAL] IDs guardados:', {
-      brand_id: record.brand_id,
-      campaign_id: record.campaign_id,
-      ooh_type_id: record.ooh_type_id,
-      provider_id: record.provider_id,
-      city_id: record.city_id
-    });
-    setEditMode(false);
-    setShowModal(true);
-  };
 
-  const closeModal = () => {
-    setShowModal(false);
-    setSelectedRecord(null);
-    setEditMode(false);
-    setEditData({});
-    setImageReplacements({});
-    setIsSyncingBQ(false);
-  };
-
-  // Sincronizar registro individual a BigQuery
-  const syncToBigQuery = async () => {
-    if (!selectedRecord?.id) {
-      alert('⚠️ No hay registro seleccionado');
-      return;
-    }
-
-    setIsSyncingBQ(true);
-    try {
-      const response = await axios.post(
-        `http://localhost:8080/api/ooh/${selectedRecord.id}/sync-bigquery`
-      );
-
-      if (response.data.success) {
-        setSyncStatus(prev => ({
-          ...prev,
-          [selectedRecord.id]: {
-            synced: true,
-            syncedAt: response.data.data.synced_to_bigquery
-          }
-        }));
-        alert('✅ Registro sincronizado a BigQuery exitosamente');
-        // Actualizar el registro en la lista
-        setSelectedRecord(prev => ({
-          ...prev,
-          synced_to_bigquery: response.data.data.synced_to_bigquery,
-          bq_sync_status: 'synced'
-        }));
-      } else {
-        alert(`❌ Error: ${response.data.error}`);
-      }
-    } catch (error) {
-      console.error('Error sincronizando a BigQuery:', error);
-      alert(`❌ Error al sincronizar: ${error.response?.data?.error || error.message}`);
-    } finally {
-      setIsSyncingBQ(false);
-    }
-  };
 
   // Manejar selección de tarjetas
   const toggleCardSelection = (recordId) => {
@@ -1034,8 +735,7 @@ const OOHList = ({ refreshTrigger }) => {
       // Eliminar uno por uno
       const results = await Promise.all(
         idsToDelete.map(id =>
-          axios
-            .delete(`http://localhost:8080/api/ooh/${id}`)
+          deleteRecord(id)
             .then(() => ({ id, success: true }))
             .catch(err => ({ id, success: false, error: err.message }))
         )
@@ -1065,85 +765,7 @@ const OOHList = ({ refreshTrigger }) => {
     }
   };
 
-  const handleEditChange = (field, value) => {
-    setEditData(prev => ({ ...prev, [field]: value }));
-  };
 
-  const handleImageChangeSlot = (slot, fileList) => {
-    const file = fileList && fileList[0];
-    if (!file) return;
-    setImageReplacements(prev => ({ ...prev, [slot]: file }));
-  };
-
-  const saveChanges = async () => {
-    try {
-      console.log('🔄 [OOHLIST - ACTUALIZAR] Editando registro existente ID:', editData.id);
-      console.log('📝 Datos actuales:', editData);
-      
-      // ✅ USAR IDs ORIGINALES del registro (no buscar por nombre)
-      console.log('✅ [ACTUALIZAR] Usando IDs originales del registro:');
-      console.log(`   brand_id: ${editData.brand_id}`);
-      console.log(`   campaign_id: ${editData.campaign_id}`);
-      console.log(`   ooh_type_id: ${editData.ooh_type_id}`);
-      console.log(`   provider_id: ${editData.provider_id}`);
-      console.log(`   city_id: ${editData.city_id}`);
-      
-      // Validar que tenemos los IDs
-      if (!editData.brand_id || !editData.campaign_id || !editData.ooh_type_id || !editData.provider_id || !editData.city_id) {
-        alert('❌ Error: Faltan IDs en el registro. Cierra y vuelve a abrir el modal.');
-        return;
-      }
-      
-      // Preparar FormData para enviar con IDs (no nombres)
-      const formData = new FormData();
-      formData.append('existingId', editData.id); // ← ESTO INDICA AL BACKEND QUE ES UPDATE
-      
-      // ✅ ENVIAR IDs originales
-      formData.append('brand_id', editData.brand_id);
-      formData.append('campaign_id', editData.campaign_id);
-      formData.append('city_id', editData.city_id);
-      formData.append('ooh_type_id', editData.ooh_type_id);
-      formData.append('provider_id', editData.provider_id);
-      
-      // ✅ CAMPOS COMUNES (sin nombres)
-      formData.append('direccion', editData.direccion);
-      formData.append('latitud', editData.latitud);
-      formData.append('longitud', editData.longitud);
-      formData.append('fechaInicio', editData.fechaInicio);
-      formData.append('fechaFin', editData.fechaFin);
-
-      // Agregar nuevas imágenes si se seleccionaron (por slot)
-      const slots = Object.keys(imageReplacements);
-      if (slots.length > 0) {
-        // console.log(`🖼️ [ACTUALIZAR] Reemplazando ${slots.length} imagen(es) en slots:`, slots);
-        formData.append('imageIndexes', slots.join(',')); // slots en base 1
-        slots.forEach(slot => {
-          formData.append('imagenes', imageReplacements[slot]);
-        });
-      } else {
-        // console.log('🖼️ [ACTUALIZAR] Sin cambios de imágenes');
-      }
-
-      // console.log('📤 [ACTUALIZAR] Enviando a POST /api/ooh/create con existingId...');
-      const response = await axios.post('http://localhost:8080/api/ooh/create', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      
-      if (response.data.success) {
-        // console.log('✅ [ACTUALIZAR] Registro actualizado exitosamente:', response.data);
-        alert('✅ Registro actualizado correctamente');
-        setEditMode(false);
-        pageRef.current = 1;
-        loadPage(1, false); // Recargar datos
-        closeModal();
-      }
-    } catch (error) {
-      console.error('Error al guardar cambios:', error);
-      alert('❌ Error al guardar los cambios');
-    }
-  };
 
   // Función para parsear fechas en formato DD/MM/YYYY o D/MM/YYYY
   const formatDate = (dateStr) => {
@@ -1403,55 +1025,19 @@ const OOHList = ({ refreshTrigger }) => {
                 </div>
                 <div className="detail-row">
                   <strong>Marca:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.marca} 
-                      onChange={(e) => handleEditChange('marca', e.target.value)}
-                      className="edit-input"
-                    />
-                  ) : (
-                    <span>{selectedRecord.marca}</span>
-                  )}
+                  <span>{selectedRecord.marca}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Campaña:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.campana} 
-                      onChange={(e) => handleEditChange('campana', e.target.value)}
-                      className="edit-input"
-                    />
-                  ) : (
-                    <span>{selectedRecord.campana}</span>
-                  )}
+                  <span>{selectedRecord.campana}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Categoría:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.categoria} 
-                      onChange={(e) => handleEditChange('categoria', e.target.value)}
-                      className="edit-input"
-                    />
-                  ) : (
-                    <span>{selectedRecord.categoria}</span>
-                  )}
+                  <span>{selectedRecord.categoria}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Proveedor:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.proveedor} 
-                      onChange={(e) => handleEditChange('proveedor', e.target.value)}
-                      className="edit-input"
-                    />
-                  ) : (
-                    <span>{selectedRecord.proveedor}</span>
-                  )}
+                  <span>{selectedRecord.proveedor}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Dirección:</strong>
@@ -1468,54 +1054,15 @@ const OOHList = ({ refreshTrigger }) => {
                 </div>
                 <div className="detail-row">
                   <strong>Ciudad:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.ciudad} 
-                      onChange={(e) => handleEditChange('ciudad', e.target.value)}
-                      className="edit-input"
-                    />
-                  ) : (
-                    <span>{selectedRecord.ciudad}</span>
-                  )}
+                  <span>{selectedRecord.ciudad}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Región:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.region} 
-                      onChange={(e) => handleEditChange('region', e.target.value)}
-                      className="edit-input"
-                    />
-                  ) : (
-                    <span>{selectedRecord.ciudad_region || selectedRecord.region}</span>
-                  )}
+                  <span>{selectedRecord.ciudad_region || selectedRecord.region}</span>
                 </div>
                 <div className="detail-row">
                   <strong>Coordenadas:</strong>
-                  {editMode ? (
-                    <div style={{display: 'flex', gap: '5px'}}>
-                      <input 
-                        type="text" 
-                        value={editData.latitud} 
-                        onChange={(e) => handleEditChange('latitud', e.target.value)}
-                        className="edit-input"
-                        placeholder="Latitud"
-                        style={{flex: 1}}
-                      />
-                      <input 
-                        type="text" 
-                        value={editData.longitud} 
-                        onChange={(e) => handleEditChange('longitud', e.target.value)}
-                        className="edit-input"
-                        placeholder="Longitud"
-                        style={{flex: 1}}
-                      />
-                    </div>
-                  ) : (
-                    <span>{selectedRecord.latitud},{selectedRecord.longitud}</span>
-                  )}
+                  <span>{selectedRecord.latitud},{selectedRecord.longitud}</span>
                 </div>
 
                 {/* Mapa de ubicación */}
@@ -1523,13 +1070,10 @@ const OOHList = ({ refreshTrigger }) => {
                   <div className="detail-row-full">
                     <strong>📍 Ubicación en el mapa:</strong>
                     <MapPicker
-                      latitude={editMode ? editData.latitud : selectedRecord.latitud}
-                      longitude={editMode ? editData.longitud : selectedRecord.longitud}
-                      onLocationChange={editMode ? (lat, lng) => {
-                        handleEditChange('latitud', lat.toFixed(4));
-                        handleEditChange('longitud', lng.toFixed(4));
-                      } : null}
-                      editable={editMode}
+                      latitude={selectedRecord.latitud}
+                      longitude={selectedRecord.longitud}
+                      onLocationChange={null}
+                      editable={false}
                       height="250px"
                       zoom={15}
                       showCoordinates={true}
@@ -1569,17 +1113,7 @@ const OOHList = ({ refreshTrigger }) => {
                 </div>
                 <div className="detail-row">
                   <strong>Tipo OOH:</strong>
-                  {editMode ? (
-                    <input 
-                      type="text" 
-                      value={editData.tipoOOH} 
-                      onChange={(e) => handleEditChange('tipoOOH', e.target.value)}
-                      className="edit-input"
-                      list="tiposOOH"
-                    />
-                  ) : (
-                    <span>{selectedRecord.tipo_ooh}</span>
-                  )}
+                  <span>{selectedRecord.tipo_ooh}</span>
                 </div>
                 {selectedRecord.review_required && (
                   <div className="detail-row review-warning">
@@ -2057,7 +1591,7 @@ const OOHList = ({ refreshTrigger }) => {
                 Cancelar
               </button>
               <button 
-                onClick={downloadReportPPT} 
+                onClick={downloadReportPPTHandler} 
                 className="modal-btn-save"
                 disabled={isDownloading || !reportMonth}
               >

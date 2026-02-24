@@ -280,7 +280,14 @@ export const AppProvider = ({ children }) => {
         brandId
       });
       if (res.data.success) {
-        return res.data.data;
+        const newCampaign = res.data.data;
+        // Actualizar state con la nueva campaña
+        setCampaigns(prev => [...prev, { 
+          id: newCampaign.id, 
+          nombre: newCampaign.nombre, 
+          brand_id: newCampaign.brand_id || brandId 
+        }]);
+        return newCampaign;
       }
     } catch (error) {
       console.error('Error creando campaña:', error);
