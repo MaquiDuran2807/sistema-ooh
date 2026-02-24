@@ -127,8 +127,23 @@
 
 .images-section h3 {
   color: #333;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
   font-size: 1.3em;
+}
+
+.images-info {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  padding: 12px 15px;
+  margin-bottom: 20px;
+  color: #856404;
+  font-size: 0.95em;
+  line-height: 1.6;
+}
+
+.images-info strong {
+  color: #000;
 }
 
 .images-grid {
@@ -251,6 +266,102 @@
   cursor: not-allowed;
 }
 
+.input-with-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-with-button select {
+  flex: 1;
+}
+
+.btn-add {
+  padding: 10px 12px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+
+.btn-add:hover {
+  background-color: #218838;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.btn-add:active {
+  transform: scale(0.98);
+}
+
+.btn-add-inline {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+}
+
+.btn-add-inline:hover {
+  background-color: #0056b3;
+}
+
+/* Form Actions */
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.submit-btn,
+.excel-upload-btn {
+  flex: 1;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.submit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.excel-upload-btn {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+.excel-upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(245, 87, 108, 0.3);
+}
+
 @media (max-width: 600px) {
   .ooh-form {
     padding: 20px;
@@ -262,5 +373,14 @@
 
   .ooh-form h2 {
     font-size: 1.5em;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .submit-btn,
+  .excel-upload-btn {
+    width: 100%;
   }
 }

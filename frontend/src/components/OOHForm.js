@@ -3,18 +3,37 @@ import axios from 'axios';
 import './OOHForm.css';
 import AddCiudadModal from './AddCiudadModal';
 import AddMarcaModal from './AddMarcaModal';
+import AddProveedorModal from './AddProveedorModal';
+import AddTipoOOHModal from './AddTipoOOHModal';
+import AddDireccionModal from './AddDireccionModal';
+import AddCampanaModal from './AddCampanaModal';
+import ExcelUploader from './ExcelUploader';
+import SearchableSelect from './SearchableSelect';
 import { ciudades } from '../data/ciudades';
 import { useApp } from '../context/AppContext';
+import dbService from '../services/dbService';
 
 const OOHForm = ({ onSuccess }) => {
+  // Obtener datos del contexto global
   const { 
-    fetchBrands, 
+    brands,
+    campaigns,
+    categories,
+    advertisers,
+    cities: contextCities,
+    addresses: contextAddresses,
+    providers: contextProviders,
+    regions: contextRegions,
+    oohTypes: contextOohTypes,
     fetchCampaigns, 
+    fetchBrands, 
+    fetchCampaigns: fetchCampaignsAPI, 
     fetchOohTypes, 
     createBrand, 
     createCampaign, 
     createOohType
   } = useApp();
+
   const [formData, setFormData] = useState({
     marca: '',
     categoria: '',
@@ -43,100 +62,118 @@ const OOHForm = ({ onSuccess }) => {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showAddCiudadModal, setShowAddCiudadModal] = useState(false);
   const [showAddMarcaModal, setShowAddMarcaModal] = useState(false);
+  const [showAddProveedorModal, setShowAddProveedorModal] = useState(false);
+  const [showAddTipoOOHModal, setShowAddTipoOOHModal] = useState(false);
+  const [showAddDireccionModal, setShowAddDireccionModal] = useState(false);
+  const [showAddCampanaModal, setShowAddCampanaModal] = useState(false);
+  const [showExcelUploader, setShowExcelUploader] = useState(false);
 
-  // Cargar ciudades desde localStorage + ciudades predefinidas
+  // Cargar marcas del contexto global
   useEffect(() => {
-    const storedCities = localStorage.getItem('customCities');
-    const customCities = storedCities ? JSON.parse(storedCities) : [];
-    const allCities = [...ciudades, ...customCities];
-    setAvailableCities(allCities);
-  }, []);
+    if (brands && brands.length > 0) {
+      setAvailableMarcas(brands);
+    }
+  }, [brands]);
 
-  // Cargar marcas desde contexto global
+  // Cargar proveedores del contexto global
   useEffect(() => {
-    const loadBrands = async () => {
-      const data = await fetchBrands();
-      if (data) {
-        setAvailableMarcas(data);
-      }
-    };
-    loadBrands();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Sin dependencias — ejecutar UNA SOLA VEZ al montar
+    if (contextProviders && contextProviders.length > 0) {
+      const proveedorNames = contextProviders.map(p => p.nombre || p);
+      setAvailableProveedores(proveedorNames);
+    }
+  }, [contextProviders]);
 
-  // Cargar tipos OOH desde contexto global
+  // Cargar tipos OOH del contexto global
   useEffect(() => {
-    const loadTypes = async () => {
-      const data = await fetchOohTypes();
-      if (data) {
-        setAvailableTiposOOH(data);
-      }
-    };
-    loadTypes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Sin dependencias — ejecutar UNA SOLA VEZ al montar
+    if (contextOohTypes && contextOohTypes.length > 0) {
+      const oohTypeNames = contextOohTypes.map(t => t.nombre || t);
+      setAvailableTiposOOH(oohTypeNames);
+    }
+  }, [contextOohTypes]);
 
-  // Cargar proveedores desde localStorage
+  // Cargar ciudades y direcciones del contexto global
   useEffect(() => {
-    const storedProveedores = localStorage.getItem('proveedores');
-    const proveedores = storedProveedores ? JSON.parse(storedProveedores) : [];
-    setAvailableProveedores(proveedores);
-  }, []);
+    if (contextCities && contextCities.length > 0) {
+      setAvailableCities(contextCities);
+    }
+    
+    if (contextAddresses && contextAddresses.length > 0) {
+      const direccionesNames = contextAddresses.map(a => a.descripcion || `${a.ciudad}`);
+      setAvailableDirecciones(direccionesNames);
+    }
+  }, [contextCities, contextAddresses]);
 
-  // Cargar direcciones desde localStorage
-  useEffect(() => {
-    const storedDirecciones = localStorage.getItem('direcciones');
-    const direcciones = storedDirecciones ? JSON.parse(storedDirecciones) : [];
-    setAvailableDirecciones(direcciones);
-  }, []);
-
-  const handleMarcaChange = async (value) => {
-    const foundMarca = (availableMarcas || []).find(m => m.nombre === value);
+  // Manejar selección de marca
+  const handleMarcaChange = (brandId) => {
+    const foundMarca = brands.find(m => m.id === brandId);
     
     if (foundMarca) {
       setFormData(prev => ({
         ...prev,
-        marca: value,
-        categoria: foundMarca.categoria,
+        marca: foundMarca.nombre,
+        categoria: foundMarca.categoria || '',
         campana: ''
       }));
       
-      // Cargar campañas de la marca desde contexto
-      try {
-        const campaignsData = await fetchCampaigns(foundMarca.id);
-        setAvailableCampanas(campaignsData);
-      } catch (error) {
-        console.error('Error cargando campañas:', error);
+      // Cargar campañas de la marca desde el contexto global
+      if (campaigns && campaigns.length > 0) {
+        const marcaCampaigns = campaigns
+          .filter(c => c.brand_id === brandId)
+          .map(c => ({ id: c.id, nombre: c.nombre, brand_id: c.brand_id }));
+        setAvailableCampanas(marcaCampaigns);
+      } else {
         setAvailableCampanas([]);
       }
     } else {
-      setFormData(prev => ({ ...prev, marca: value, categoria: '', campana: '' }));
+      setFormData(prev => ({ ...prev, marca: '', categoria: '', campana: '' }));
       setAvailableCampanas([]);
     }
   };
 
   const handleAddMarca = async (newMarca) => {
     try {
-      const createdBrand = await createBrand(newMarca.nombre, newMarca.categoria);
-      
-      setAvailableMarcas(prev => [...(prev || []), {
-        id: createdBrand.id,
-        nombre: createdBrand.nombre,
-        categoria: createdBrand.categoria || ''
-      }]);
+      // Usar los datos de newMarca directamente (ya viene del modal con toda la info)
+      const marcaData = {
+        id: Math.max(...availableMarcas.map(m => m.id || 0), 0) + 1,
+        nombre: newMarca.nombre,
+        categoria: newMarca.categoria,
+        category_id: newMarca.category_id,
+        advertiser_id: newMarca.advertiser_id,
+        anunciante: newMarca.anunciante
+      };
+
+      setAvailableMarcas(prev => [...(prev || []), marcaData]);
       setFormData(prev => ({
         ...prev,
-        marca: createdBrand.nombre,
-        categoria: createdBrand.categoria,
+        marca: newMarca.nombre,
+        categoria: newMarca.categoria,
         campana: ''
       }));
       setAvailableCampanas([]);
       setShowAddMarcaModal(false);
-      setMessage({ type: 'success', text: 'Marca creada exitosamente' });
+      setMessage({ type: 'success', text: '✅ Marca creada exitosamente' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
       console.error('❌ Error creando marca:', error);
       setMessage({ type: 'error', text: 'Error al crear marca' });
     }
+  };
+
+  const handleAddCampaña = (newCampaña) => {
+    const newCampaignData = {
+      id: Math.max(...campaigns.map(c => c.id || 0), 0) + 1,
+      nombre: newCampaña.nombre,
+      brand_id: newCampaña.brand_id
+    };
+
+    setAvailableCampanas(prev => [...(prev || []), newCampaignData]);
+    setFormData(prev => ({
+      ...prev,
+      campana: newCampaña.nombre
+    }));
+    setShowAddCampanaModal(false);
+    setMessage({ type: 'success', text: '✅ Campaña creada exitosamente' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   };
 
   const handleProveedorChange = (value) => {
@@ -153,12 +190,13 @@ const OOHForm = ({ onSuccess }) => {
     setFormData(prev => ({ ...prev, campana: value }));
     
     // Si escribe campaña nueva no presente en lista y hay marca seleccionada, crearla
-    if (value && !(availableCampanas || []).includes(value) && formData.marca) {
-      const marca = (availableMarcas || []).find(m => m.nombre === formData.marca);
+    if (value && !availableCampanas.find(c => c.nombre === value) && formData.marca) {
+      const marca = availableMarcas.find(m => m.nombre === formData.marca);
       if (marca && marca.id) {
         try {
           await createCampaign(value, marca.id);
-          setAvailableCampanas(prev => [...(prev || []), value]);
+          const newCampaign = { nombre: value, brand_id: marca.id };
+          setAvailableCampanas(prev => [...(prev || []), newCampaign]);
         } catch (error) {
           console.error('Error creando campaña:', error);
         }
@@ -166,25 +204,58 @@ const OOHForm = ({ onSuccess }) => {
     }
   };
 
-  const handleTipoOOHChange = async (value) => {
-    setFormData(prev => ({ ...prev, tipoOOH: value }));
-    if (value && !(availableTiposOOH || []).includes(value)) {
-      try {
-        await createOohType(value);
-        setAvailableTiposOOH(prev => [...(prev || []), value]);
-      } catch (error) {
-        console.error('Error creando tipo OOH:', error);
-      }
+  // Mostrar todas las campañas si no hay marca seleccionada
+  const getVisibleCampanas = () => {
+    if (formData.marca && availableCampanas.length > 0) {
+      // Si hay marca seleccionada, mostrar solo sus campañas
+      return availableCampanas;
+    } else if (!formData.marca && campaigns && campaigns.length > 0) {
+      // Si no hay marca seleccionada, mostrar todas las campañas
+      return campaigns.map(c => ({ id: c.id, nombre: c.nombre, brand_id: c.brand_id }));
     }
+    return [];
   };
 
   const handleDireccionChange = (value) => {
-    setFormData(prev => ({ ...prev, direccion: value }));
+    console.log('📍 Dirección seleccionada:', value);
     
-    if (value && !(availableDirecciones || []).includes(value)) {
-      const updated = [...(availableDirecciones || []), value];
-      setAvailableDirecciones(updated);
-      localStorage.setItem('direcciones', JSON.stringify(updated));
+    // Buscar la dirección completa en contextAddresses
+    const foundAddress = contextAddresses?.find(a => a.descripcion === value);
+    
+    if (foundAddress) {
+      console.log('✅ Dirección encontrada en AppContext:', foundAddress);
+      
+      // Buscar la ciudad asociada
+      const foundCity = contextCities?.find(c => c.id === foundAddress.city_id);
+      
+      if (foundCity) {
+        console.log('✅ Ciudad encontrada:', foundCity);
+        
+        // ✅ LLENAR TODOS LOS CAMPOS automáticamente
+        setFormData(prev => ({
+          ...prev,
+          direccion: value,
+          ciudad: foundCity.nombre,
+          region: foundCity.region,
+          latitud: foundAddress.latitud,
+          longitud: foundAddress.longitud
+        }));
+        
+        console.log('✅ Formulario actualizado con dirección completa');
+      } else {
+        console.warn('⚠️ Ciudad no encontrada para city_id:', foundAddress.city_id);
+        // Solo llenar dirección y coordenadas
+        setFormData(prev => ({
+          ...prev,
+          direccion: value,
+          latitud: foundAddress.latitud,
+          longitud: foundAddress.longitud
+        }));
+      }
+    } else {
+      console.log('⚠️ Dirección no encontrada en AppContext, solo actualizando campo');
+      // Solo actualizar el campo de dirección
+      setFormData(prev => ({ ...prev, direccion: value }));
     }
   };
 
@@ -203,26 +274,158 @@ const OOHForm = ({ onSuccess }) => {
     }
   };
 
-  const handleAddCiudad = (newCity) => {
-    const newCityData = {
-      nombre: newCity.nombre,
-      region: newCity.region
-    };
-    
-    // Guardar en localStorage
-    const storedCities = localStorage.getItem('customCities');
-    const customCities = storedCities ? JSON.parse(storedCities) : [];
-    customCities.push(newCityData);
-    localStorage.setItem('customCities', JSON.stringify(customCities));
-    
-    // Actualizar estado
-    setAvailableCities(prev => [...(prev || []), newCityData]);
+  const handleAddCiudad = async (newCity) => {
+    try {
+      const isUpdate = newCity.isUpdate && newCity.cityId;
+      const url = isUpdate 
+        ? `http://localhost:8080/api/ooh/cities/${newCity.cityId}`
+        : 'http://localhost:8080/api/ooh/cities';
+      
+      const method = isUpdate ? 'PUT' : 'POST';
+      
+      // Enviar al backend para guardar/actualizar en BD
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          nombre: newCity.nombre,
+          region: newCity.region,
+          latitud: newCity.latitud,
+          longitud: newCity.longitud,
+          radio: newCity.radio
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok || !result.success) {
+        console.error(`❌ Error al ${isUpdate ? 'actualizar' : 'crear'} ciudad:`, result.error || result.message);
+        alert(`Error: ${result.error || result.message}`);
+        return;
+      }
+      
+      // Si fue exitoso, actualizar el estado
+      const cityData = result.data;
+      
+      if (isUpdate) {
+        // Actualizar ciudad existente en el array
+        setAvailableCities(prev => 
+          prev.map(city => city.id === newCity.cityId ? cityData : city)
+        );
+      } else {
+        // Agregar nueva ciudad al array
+        setAvailableCities(prev => [...(prev || []), cityData]);
+      }
+      
+      setFormData(prev => ({
+        ...prev,
+        ciudad: newCity.nombre,
+        region: newCity.region
+      }));
+      
+      console.log(`✅ Ciudad ${isUpdate ? 'actualizada' : 'agregada'} exitosamente: ${newCity.nombre}`);
+      setShowAddCiudadModal(false);
+      
+    } catch (error) {
+      console.error('❌ Error de conexión al procesar ciudad:', error);
+      alert('Error de conexión: No se puede procesar la ciudad');
+    }
+  };
+
+  const handleAddProveedor = (newProveedor) => {
+    setAvailableProveedores(prev => [...(prev || []), newProveedor.nombre]);
     setFormData(prev => ({
       ...prev,
-      ciudad: newCity.nombre,
-      region: newCity.region
+      proveedor: newProveedor.nombre
     }));
-    setShowAddCiudadModal(false);
+    setShowAddProveedorModal(false);
+    setMessage({ type: 'success', text: '✅ Proveedor creado exitosamente' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handleAddTipoOOH = (newTipo) => {
+    setAvailableTiposOOH(prev => [...(prev || []), newTipo.nombre]);
+    setFormData(prev => ({
+      ...prev,
+      tipoOOH: newTipo.nombre
+    }));
+    setShowAddTipoOOHModal(false);
+    setMessage({ type: 'success', text: '✅ Tipo OOH creado exitosamente' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handleAddDireccion = async (newDireccion) => {
+    console.log('📍 Agregando nueva dirección:', newDireccion);
+    
+    try {
+      // Buscar la ciudad en contextCities para obtener su ID
+      const ciudad = contextCities?.find(c => c.nombre === newDireccion.ciudad);
+      
+      if (!ciudad) {
+        console.error('❌ Ciudad no encontrada:', newDireccion.ciudad);
+        setMessage({ type: 'error', text: `Ciudad "${newDireccion.ciudad}" no encontrada` });
+        return;
+      }
+      
+      // ✅ GUARDAR EN BD primero
+      console.log('💾 Guardando dirección en BD...');
+      const response = await fetch('http://localhost:8080/api/ooh/addresses/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          city_id: ciudad.id,
+          descripcion: newDireccion.descripcion,
+          latitud: newDireccion.latitud,
+          longitud: newDireccion.longitud
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok || !result.success) {
+        console.error('❌ Error al crear dirección:', result.error || result.message);
+        setMessage({ type: 'error', text: `Error: ${result.error || result.message}` });
+        return;
+      }
+      
+      console.log('✅ Dirección guardada en BD:', result.data);
+      const newAddress = result.data;
+      
+      const direccionName = newDireccion.descripcion;
+      
+      // Actualizar estado local
+      setAvailableDirecciones(prev => [...(prev || []), direccionName]);
+      
+      // ✅ LLENAR FORMULARIO con dirección, coordenadas, ciudad y región
+      setFormData(prev => ({
+        ...prev,
+        direccion: direccionName,
+        latitud: newDireccion.latitud,
+        longitud: newDireccion.longitud,
+        ciudad: ciudad.nombre,        // ✅ LLENAR CIUDAD
+        region: ciudad.region          // ✅ LLENAR REGIÓN
+      }));
+      
+      setShowAddDireccionModal(false);
+      setMessage({ type: 'success', text: `✅ Dirección creada: ${direccionName} (${ciudad.nombre})` });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      
+      console.log('✅ Formulario actualizado con:', {
+        direccion: direccionName,
+        ciudad: ciudad.nombre,
+        region: ciudad.region,
+        latitud: newDireccion.latitud,
+        longitud: newDireccion.longitud
+      });
+      
+    } catch (error) {
+      console.error('❌ Error creando dirección:', error);
+      setMessage({ type: 'error', text: 'Error al crear dirección' });
+    }
   };
 
   const handleInputChange = (e) => {
@@ -277,10 +480,10 @@ const OOHForm = ({ onSuccess }) => {
     e.preventDefault();
 
     // Validar campos obligatorios (fechaFin es opcional para actualizaciones)
-    if (!formData.marca || !formData.categoria || !formData.proveedor || !formData.tipoOOH || !formData.campana || !formData.direccion || 
-        !formData.ciudad || !formData.region || !formData.latitud || !formData.longitud || 
+    if (!formData.marca || !formData.proveedor || !formData.tipoOOH || !formData.campana || !formData.direccion || 
+        !formData.ciudad || !formData.latitud || !formData.longitud || 
         !formData.fechaInicio) {
-      setMessage({ type: 'error', text: 'Faltan campos obligatorios: marca, categoría, proveedor, tipoOOH, campaña, dirección, ciudad, región, latitud, longitud, fechaInicio' });
+      setMessage({ type: 'error', text: 'Faltan campos obligatorios: marca, proveedor, tipoOOH, campaña, dirección, ciudad, latitud, longitud, fechaInicio' });
       return;
     }
 
@@ -296,40 +499,89 @@ const OOHForm = ({ onSuccess }) => {
       return;
     }
 
-    if (images.filter(img => img !== null).length !== 3) {
-      setMessage({ type: 'error', text: 'Debes subir exactamente 3 imágenes' });
+    const imageCount = images.filter(img => img !== null).length;
+    if (imageCount === 0) {
+      setMessage({ type: 'error', text: '⚠️ Debes subir al menos 1 imagen. Se recomienda subir 3 imágenes.' });
       return;
     }
 
-    // Preparar FormData
-    const formDataToSend = new FormData();
-    formDataToSend.append('marca', formData.marca);
-    formDataToSend.append('categoria', formData.categoria);
-    formDataToSend.append('proveedor', formData.proveedor);
-    formDataToSend.append('tipoOOH', formData.tipoOOH);
-    formDataToSend.append('campana', formData.campana);
-    formDataToSend.append('direccion', formData.direccion);
-    formDataToSend.append('ciudad', formData.ciudad);
-    formDataToSend.append('region', formData.region);
-    formDataToSend.append('latitud', formData.latitud);
-    formDataToSend.append('longitud', formData.longitud);
-    formDataToSend.append('fechaInicio', formData.fechaInicio);
-    formDataToSend.append('fechaFin', formData.fechaFin);
-    
-    images.forEach((image, index) => {
-      if (image) {
-        formDataToSend.append('imagenes', image);
-      }
-    });
-
     setLoading(true);
+
     try {
+      console.log('➕ [OOHFORM - CREAR NUEVO] Iniciando creación de registro...');
+      
+      // ✅ NUEVA ARQUITECTURA: Mapear nombres → IDs (USANDO APPCONTEXT)
+      console.log('🔍 [CREAR] Mapeando nombres a IDs desde AppContext...');
+      
+      // Obtener IDs desde AppContext usando dbService (PASANDO LOS ARRAYS)
+      const brand = await dbService.getBrandByName(formData.marca, brands);
+      const city = await dbService.getCityByName(formData.ciudad, contextCities);
+      const oohType = await dbService.getOOHTypeByName(formData.tipoOOH, contextOohTypes);
+      const provider = await dbService.getProviderByName(formData.proveedor, contextProviders);
+      const campaign = await dbService.getCampaignByName(formData.campana, campaigns);
+      
+      console.log('📊 [CREAR] IDs obtenidos:');
+      console.log(`   brand_id: ${brand?.id} (${formData.marca})`);
+      console.log(`   city_id: ${city?.id} (${formData.ciudad})`);
+      console.log(`   ooh_type_id: ${oohType?.id} (${formData.tipoOOH})`);
+      console.log(`   provider_id: ${provider?.id} (${formData.proveedor})`);
+      console.log(`   campaign_id: ${campaign?.id} (${formData.campana})`);
+
+      // Validar que se obtuvieron todos los IDs
+      if (!brand?.id || !city?.id || !oohType?.id || !provider?.id || !campaign?.id) {
+        const missing = [];
+        if (!brand?.id) missing.push(`marca "${formData.marca}"`);
+        if (!city?.id) missing.push(`ciudad "${formData.ciudad}"`);
+        if (!oohType?.id) missing.push(`tipo OOH "${formData.tipoOOH}"`);
+        if (!provider?.id) missing.push(`proveedor "${formData.proveedor}"`);
+        if (!campaign?.id) missing.push(`campaña "${formData.campana}"`);
+        
+        setMessage({ 
+          type: 'error', 
+          text: `❌ No se encontraron: ${missing.join(', ')}. Verifica los datos ingresados.` 
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Preparar FormData con IDs en lugar de nombres
+      const formDataToSend = new FormData();
+      
+      // ✅ NUEVOS CAMPOS: IDs (REQUERIDOS)
+      formDataToSend.append('brand_id', brand.id);
+      formDataToSend.append('campaign_id', campaign.id);
+      formDataToSend.append('city_id', city.id);
+      formDataToSend.append('ooh_type_id', oohType.id);
+      formDataToSend.append('provider_id', provider.id);
+      
+      // ✅ CAMPOS COMUNES (sin cambios)
+      formDataToSend.append('direccion', formData.direccion);
+      formDataToSend.append('latitud', formData.latitud);
+      formDataToSend.append('longitud', formData.longitud);
+      formDataToSend.append('fechaInicio', formData.fechaInicio);
+      formDataToSend.append('fechaFin', formData.fechaFin);
+      
+      // ❌ NO ENVIAR: marca, categoria, proveedor, tipoOOH, campana, ciudad, region
+      // Estos se derivan automáticamente de los IDs en el backend
+      
+      // Imágenes
+      images.forEach((image, index) => {
+        if (image) {
+          formDataToSend.append('imagenes', image);
+        }
+      });
+
+      console.log('✅ [CREAR] FormData preparado con IDs (sin nombres, sin existingId)');
+      console.log('📤 [CREAR] Enviando a POST /api/ooh/create (nuevo registro)...');
+      
       const response = await axios.post('http://localhost:8080/api/ooh/create', formDataToSend, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
       });
 
+      console.log('✅ [CREAR] Respuesta exitosa:', response.data);      console.log('✅ Respuesta exitosa:', response.data);
+      
       setMessage({ type: 'success', text: '✅ Registro creado exitosamente' });
       
       // Limpiar formulario
@@ -353,7 +605,7 @@ const OOHForm = ({ onSuccess }) => {
 
       // Mostrar mensaje de actualización o creación
       if (response.data.updated) {
-        setMessage({ type: 'success', text: '✅ Registro actualizado exitosamente (misma dirección, fecha, marca y campaña)' });
+        setMessage({ type: 'success', text: '✅ Registro actualizado exitosamente' });
       } else {
         setMessage({ type: 'success', text: '✅ Registro creado exitosamente' });
       }
@@ -363,10 +615,20 @@ const OOHForm = ({ onSuccess }) => {
         onSuccess();
       }, 2000);
     } catch (error) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.error || 'Error al crear el registro' 
-      });
+      console.error('❌ Error en handleSubmit:', error);
+      
+      // Si el error tiene mensaje del servidor, mostrarlo
+      if (error.response?.data?.error) {
+        setMessage({ 
+          type: 'error', 
+          text: `❌ ${error.response.data.error}` 
+        });
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: `Error: ${error.message}` 
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -385,35 +647,33 @@ const OOHForm = ({ onSuccess }) => {
 
         <div className="form-row">
           <div className="form-group">
-            <label htmlFor="marca">Marca *</label>
-            <input
-              type="text"
-              id="marca"
-              name="marca"
-              list="marcas-list"
-              value={formData.marca}
-              onChange={(e) => handleMarcaChange(e.target.value)}
-              placeholder="Escribe o selecciona una marca"
-              required
-            />
-            <datalist id="marcas-list">
-              {(availableMarcas || []).map((m, idx) => (
-                <option key={idx} value={m.nombre} />
-              ))}
-            </datalist>
-            {!(availableMarcas || []).find(m => m.nombre === formData.marca) && formData.marca && (
+            <label>Marca *</label>
+            <div className="input-with-button">
+              <SearchableSelect
+                options={availableMarcas}
+                value={availableMarcas.find(m => m.nombre === formData.marca)?.id || ''}
+                onChange={handleMarcaChange}
+                placeholder="Buscar marca..."
+                required
+                displayField="nombre"
+                valueField="id"
+                onSelect={(marca) => {
+                  // La marca ya fue procesada en handleMarcaChange
+                }}
+              />
               <button 
                 type="button" 
-                className="btn-add-inline"
+                className="btn-add"
                 onClick={() => setShowAddMarcaModal(true)}
+                title="Crear nueva marca"
               >
-                + Agregar "{formData.marca}" como nueva marca
+                +
               </button>
-            )}
+            </div>
           </div>
 
           <div className="form-group">
-            <label htmlFor="categoria">Categoría *</label>
+            <label htmlFor="categoria">Categoría</label>
             <input
               type="text"
               id="categoria"
@@ -427,81 +687,115 @@ const OOHForm = ({ onSuccess }) => {
         <div className="form-row">
           <div className="form-group">
             <label htmlFor="proveedor">Proveedor *</label>
-            <input
-              type="text"
-              id="proveedor"
-              name="proveedor"
-              list="proveedores-list"
-              value={formData.proveedor}
-              onChange={(e) => handleProveedorChange(e.target.value)}
-              placeholder="Escribe o selecciona proveedor"
-              required
-            />
-            <datalist id="proveedores-list">
-              {(availableProveedores || []).map((p, idx) => (
-                <option key={idx} value={p} />
-              ))}
-            </datalist>
+            <div className="input-with-button">
+              <select
+                id="proveedor"
+                value={formData.proveedor}
+                onChange={(e) => handleProveedorChange(e.target.value)}
+                required
+              >
+                <option value="">-- Seleccionar proveedor --</option>
+                {(availableProveedores || []).map((p, idx) => (
+                  <option key={idx} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              <button 
+                type="button" 
+                className="btn-add"
+                onClick={() => setShowAddProveedorModal(true)}
+                title="Crear nuevo proveedor"
+              >
+                +
+              </button>
+            </div>
           </div>
 
           <div className="form-group">
             <label htmlFor="tipoOOH">Tipo OOH *</label>
-            <input
-              type="text"
-              id="tipoOOH"
-              name="tipoOOH"
-              list="tipos-list"
-              value={formData.tipoOOH}
-              onChange={(e) => handleTipoOOHChange(e.target.value)}
-              placeholder="VAYA, PARADEROS, VAYAS MOTORIZADAS..."
-              required
-            />
-            <datalist id="tipos-list">
-              {(availableTiposOOH || []).map((t, idx) => (
-                <option key={idx} value={t} />
-              ))}
-            </datalist>
+            <div className="input-with-button">
+              <select
+                id="tipoOOH"
+                value={formData.tipoOOH}
+                onChange={(e) => setFormData(prev => ({ ...prev, tipoOOH: e.target.value }))}
+                required
+              >
+                <option value="">-- Seleccionar tipo OOH --</option>
+                {(availableTiposOOH || []).map((t, idx) => (
+                  <option key={idx} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <button 
+                type="button" 
+                className="btn-add"
+                onClick={() => setShowAddTipoOOHModal(true)}
+                title="Crear nuevo tipo OOH"
+              >
+                +
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="form-row">
           <div className="form-group">
             <label htmlFor="campana">Campaña *</label>
-            <input
-              type="text"
-              id="campana"
-              name="campana"
-              list="campanas-list"
-              value={formData.campana}
-              onChange={(e) => handleCampanaChange(e.target.value)}
-              placeholder={(availableCampanas || []).length > 0 ? "Selecciona o escribe campaña" : "Primero selecciona una marca"}
-              required
-            />
-            <datalist id="campanas-list">
-              {(availableCampanas || []).map((c, idx) => (
-                <option key={idx} value={c} />
-              ))}
-            </datalist>
+            <div className="input-with-button">
+              <select
+                id="campana"
+                value={formData.campana}
+                onChange={(e) => handleCampanaChange(e.target.value)}
+                required
+              >
+                <option value="">
+                  {formData.marca ? "-- Seleccionar campaña --" : "-- Ver todas las campañas --"}
+                </option>
+                {getVisibleCampanas().map((c, idx) => (
+                  <option key={idx} value={c.nombre || c}>
+                    {c.nombre || c}
+                  </option>
+                ))}
+              </select>
+              <button 
+                type="button" 
+                className="btn-add"
+                onClick={() => setShowAddCampanaModal(true)}
+                title="Crear nueva campaña"
+              >
+                +
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="form-group">
           <label htmlFor="direccion">Dirección *</label>
-          <input
-            type="text"
-            id="direccion"
-            name="direccion"
-            list="direcciones-list"
-            value={formData.direccion}
-            onChange={(e) => handleDireccionChange(e.target.value)}
-            placeholder="Escribe o selecciona dirección"
-            required
-          />
-          <datalist id="direcciones-list">
-            {(availableDirecciones || []).map((d, idx) => (
-              <option key={idx} value={d} />
-            ))}
-          </datalist>
+          <div className="input-with-button">
+            <select
+              id="direccion"
+              value={formData.direccion}
+              onChange={(e) => handleDireccionChange(e.target.value)}
+              required
+            >
+              <option value="">-- Seleccionar dirección --</option>
+              {(availableDirecciones || []).map((d, idx) => (
+                <option key={idx} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <button 
+              type="button" 
+              className="btn-add"
+              onClick={() => setShowAddDireccionModal(true)}
+              title="Crear nueva dirección"
+            >
+              +
+            </button>
+          </div>
         </div>
 
         <div className="form-row">
@@ -592,7 +886,12 @@ const OOHForm = ({ onSuccess }) => {
         </div>
 
         <div className="images-section">
-          <h3>📸 Imágenes (Debes subir exactamente 3)</h3>
+          <h3>📸 Imágenes *</h3>
+          <p className="images-info">
+            ⚠️ <strong>Requerido:</strong> Debes subir al menos 1 imagen. 
+            <br />
+            💡 <strong>Recomendado:</strong> Se recomienda subir 3 imágenes para mejor visualización.
+          </p>
           <div className="images-grid">
             {[0, 1, 2].map((index) => (
               <div key={index} className="image-upload-box">
@@ -630,9 +929,19 @@ const OOHForm = ({ onSuccess }) => {
           </div>
         </div>
 
-        <button type="submit" className="submit-btn" disabled={loading}>
-          {loading ? '⏳ Guardando...' : '✓ Guardar Registro'}
-        </button>
+        <div className="form-actions">
+          <button 
+            type="button" 
+            className="excel-upload-btn"
+            onClick={() => setShowExcelUploader(true)}
+            title="Cargar múltiples registros desde Excel"
+          >
+            📊 Cargar Excel
+          </button>
+          <button type="submit" className="submit-btn" disabled={loading}>
+            {loading ? '⏳ Guardando...' : '✓ Guardar Registro'}
+          </button>
+        </div>
       </form>
 
       <AddCiudadModal 
@@ -647,6 +956,43 @@ const OOHForm = ({ onSuccess }) => {
         onClose={() => setShowAddMarcaModal(false)}
         onAdd={handleAddMarca}
       />
+
+      <AddProveedorModal 
+        isOpen={showAddProveedorModal}
+        onClose={() => setShowAddProveedorModal(false)}
+        onAdd={handleAddProveedor}
+      />
+
+      <AddTipoOOHModal 
+        isOpen={showAddTipoOOHModal}
+        onClose={() => setShowAddTipoOOHModal(false)}
+        onAdd={handleAddTipoOOH}
+      />
+
+      <AddDireccionModal 
+        isOpen={showAddDireccionModal}
+        onClose={() => setShowAddDireccionModal(false)}
+        onAdd={handleAddDireccion}
+        cities={availableCities}
+      />
+
+      <AddCampanaModal 
+        isOpen={showAddCampanaModal}
+        onClose={() => setShowAddCampanaModal(false)}
+        onAdd={handleAddCampaña}
+        brands={availableMarcas}
+      />
+
+      {showExcelUploader && (
+        <ExcelUploader
+          regions={contextRegions}
+          onDataLoaded={() => {
+            setShowExcelUploader(false);
+            if (onSuccess) onSuccess();
+          }}
+          onClose={() => setShowExcelUploader(false)}
+        />
+      )}
     </div>
   );
 };

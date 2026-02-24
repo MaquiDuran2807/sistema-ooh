@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useCallback } from 'react';
+import React, { createContext, useState, useContext, useCallback, useMemo } from 'react';
 import axios from 'axios';
 
 const AppContext = createContext();
@@ -6,10 +6,127 @@ const AppContext = createContext();
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 export const AppProvider = ({ children }) => {
+  // Datos maestros
   const [brands, setBrands] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [advertisers, setAdvertisers] = useState([]);
   const [oohTypes, setOohTypes] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [addresses, setAddresses] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [regions, setRegions] = useState([]);
+  
+  // Datos transaccionales
   const [records, setRecords] = useState([]);
+  const [recordsPagination, setRecordsPagination] = useState({
+    page: 1,
+    limit: 30,
+    total: 0,
+    totalPages: 0,
+    hasMore: false
+  });
   const [loading, setLoading] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+
+  // Cargar TODOS los datos maestros en una sola llamada
+  const initializeApp = useCallback(async () => {
+    setLoading(true);
+    try {
+      // console.log('🚀 Inicializando app... URL:', API_URL);
+      const startTime = performance.now();
+      const res = await axios.get(`${API_URL}/api/ooh/initialize`, {
+        params: { includeRecords: false }
+      });
+      const endTime = performance.now();
+      const requestTime = (endTime - startTime).toFixed(2);
+      
+      // Calcular tamaño de la respuesta recibida
+      const jsonString = JSON.stringify(res.data);
+      const sizeInBytes = new Blob([jsonString]).size;
+      const sizeInKB = (sizeInBytes / 1024).toFixed(2);
+      const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
+      
+      // console.log(`⏱️ TIEMPO DE REQUEST: ${requestTime}ms`);
+      // console.log(`📊 TAMAÑO DE RESPUESTA (cliente):`);
+      // console.log(`   Bytes: ${sizeInBytes}`);
+      // console.log(`   KB: ${sizeInKB}`);
+      // console.log(`   MB: ${sizeInMB}`);
+      
+      // Log completo de la respuesta
+      // console.log('✅ RESPUESTA COMPLETA DEL SERVIDOR:', res.data);
+      // console.log('📋 Estructura recibida:', Object.keys(res.data));
+      if (res.data.data) {
+        // console.log('📦 Claves en data:', Object.keys(res.data.data));
+      }
+      
+      if (res.data.success) {
+        // console.log('📊 Cargando datos maestros...');
+        const {
+          brands = [],
+          campaigns = [],
+          categories = [],
+          advertisers = [],
+          oohTypes = [],
+          cities = [],
+          addresses = [],
+          providers = [],
+          regions = []
+        } = res.data.data;
+        
+        setBrands(brands);
+        setCampaigns(campaigns);
+        setCategories(categories);
+        setAdvertisers(advertisers);
+        setOohTypes(oohTypes);
+        setCities(cities);
+        setAddresses(addresses);
+        setProviders(providers);
+        setRegions(regions);
+        setRecords([]);
+        setRecordsPagination({
+          page: 1,
+          limit: 20,
+          total: 0,
+          totalPages: 0,
+          hasMore: false
+        });
+        
+        // console.log('📈 RESUMEN DATOS CARGADOS:', {
+        //   brands: brands.length,
+        //   campaigns: campaigns.length,
+        //   categories: categories.length,
+        //   advertisers: advertisers.length,
+        //   oohTypes: oohTypes.length,
+        //   cities: cities.length,
+        //   addresses: addresses.length,
+        //   providers: providers.length,
+        //   regions: regions.length
+        // });
+        
+        // Log detallado de cada tipo de dato
+        // console.log('🏷️ BRANDS:', brands);
+        // console.log('📋 CAMPAIGNS:', campaigns);
+        // console.log('📂 CATEGORIES:', categories);
+        // console.log('🏢 ADVERTISERS:', advertisers);
+        // console.log('🚀 OOH_TYPES:', oohTypes);
+        // console.log('🏙️ CITIES:', cities);
+        // console.log('📍 ADDRESSES:', addresses);
+        // console.log('🏭 PROVIDERS:', providers);
+        // console.log('🗺️ REGIONS:', regions);
+        // console.log('📊 RECORDS: (carga paginada)');
+        
+        setInitialized(true);
+      } else {
+        console.error('❌ Error en respuesta:', res.data);
+      }
+    } catch (error) {
+      console.error('❌ Error inicializando app:', error.message);
+      console.error('   Detalles:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Cargar marcas desde API
   const fetchBrands = useCallback(async () => {
@@ -19,7 +136,9 @@ export const AppProvider = ({ children }) => {
         const brandsData = res.data.data.map(b => ({
           id: b.id,
           nombre: b.nombre,
-          categoria: b.categoria || ''
+          categoria: b.categoria || '',
+          category_id: b.category_id,
+          advertiser_id: b.advertiser_id
         }));
         setBrands(brandsData);
         return brandsData;
@@ -59,18 +178,65 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  // Cargar todos los registros
-  const fetchRecords = useCallback(async () => {
+  // Cargar ciudades desde API
+  const fetchCities = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_URL}/api/ooh/cities/all`);
+      if (res.data.success) {
+        const citiesData = res.data.data.map(c => ({
+          id: c.id,
+          nombre: c.nombre,
+          latitud: c.latitud,
+          longitud: c.longitud,
+          radioKm: c.radio_km,
+          region: c.region
+        }));
+        setCities(citiesData);
+        return citiesData;
+      }
+    } catch (error) {
+      console.error('❌ Error cargando ciudades:', error);
+      return [];
+    }
+  }, []);
+
+  // Cargar todos los registros con paginación
+  const fetchRecords = useCallback(async (page = 1, limit = 30, options = {}) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_URL}/api/ooh/all`);
+      const params = { page, limit };
+      if (options.mes) {
+        params.mes = options.mes;
+      }
+      if (options.ano) {
+        params.ano = options.ano;
+      }
+      // console.log(`📄 Cargando registros: page=${page}, limit=${limit}, mes=${options.mes}`);
+      const res = await axios.get(`${API_URL}/api/ooh/all`, { params });
       if (res.data.success) {
-        setRecords(res.data.data);
-        return res.data.data;
+        const append = options.append === true;
+        setRecords(prev => {
+          if (!append) return res.data.data;
+          const combined = [...prev, ...res.data.data];
+          const seen = new Set();
+          return combined.filter(item => {
+            if (!item?.id) return false;
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+        });
+        if (res.data.pagination) {
+          setRecordsPagination(res.data.pagination);
+        }
+        return {
+          data: res.data.data,
+          pagination: res.data.pagination
+        };
       }
     } catch (error) {
       console.error('Error cargando registros:', error);
-      return [];
+      return { data: [], pagination: null };
     } finally {
       setLoading(false);
     }
@@ -114,7 +280,14 @@ export const AppProvider = ({ children }) => {
         brandId
       });
       if (res.data.success) {
-        return res.data.data;
+        const newCampaign = res.data.data;
+        // Actualizar state con la nueva campaña
+        setCampaigns(prev => [...prev, { 
+          id: newCampaign.id, 
+          nombre: newCampaign.nombre, 
+          brand_id: newCampaign.brand_id || brandId 
+        }]);
+        return newCampaign;
       }
     } catch (error) {
       console.error('Error creando campaña:', error);
@@ -195,20 +368,63 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  const value = {
+  // 🔧 Memoizar el valor del contexto para evitar re-renders innecesarios
+  const value = useMemo(() => ({
+    // Datos maestros
     brands,
+    campaigns,
+    categories,
+    advertisers,
     oohTypes,
+    cities,
+    addresses,
+    providers,
+    regions,
+    
+    // Datos transaccionales
     records,
+    setRecords,
+    recordsPagination,
+    setRecordsPagination,
     loading,
+    initialized,
+    
+    // Funciones
+    initializeApp,
     fetchBrands,
     fetchCampaigns,
     fetchOohTypes,
+    fetchCities,
     fetchRecords,
     createBrand,
     createCampaign,
     createOohType,
     saveRecord
-  };
+  }), [
+    brands,
+    campaigns,
+    categories,
+    advertisers,
+    oohTypes,
+    cities,
+    addresses,
+    providers,
+    regions,
+    records,
+    recordsPagination,
+    loading,
+    initialized,
+    initializeApp,
+    fetchBrands,
+    fetchCampaigns,
+    fetchOohTypes,
+    fetchCities,
+    fetchRecords,
+    createBrand,
+    createCampaign,
+    createOohType,
+    saveRecord
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

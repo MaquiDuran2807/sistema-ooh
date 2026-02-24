@@ -137,8 +137,8 @@ const findExistingInCSVById = async (id) => {
     const content = await fs.promises.readFile(CSV_FILE, 'utf8');
     const lines = content.split('\n');
     
-    console.log('🔎 Buscando ID en CSV:', id);
-    console.log('📄 Total líneas en CSV:', lines.length - 1);
+    // console.log('🔎 Buscando ID en CSV:', id);
+    // console.log('📄 Total líneas en CSV:', lines.length - 1);
     
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
@@ -146,16 +146,16 @@ const findExistingInCSVById = async (id) => {
       const values = lines[i].split(';');
       const csvId = values[0].trim();
       
-      console.log(`Línea ${i}: Comparando "${csvId}" con "${id}"`);
+      // console.log(`Línea ${i}: Comparando "${csvId}" con "${id}"`);
       
       // Índice 0 = ID
       if (csvId === id.trim()) {
-        console.log('✅ ID encontrado en línea', i);
+        // console.log('✅ ID encontrado en línea', i);
         return { lineIndex: i, values };
       }
     }
     
-    console.log('❌ ID no encontrado en ninguna línea');
+    // console.log('❌ ID no encontrado en ninguna línea');
     return { lineIndex: -1, values: null };
   } catch (error) {
     console.error('Error al buscar en CSV por ID:', error);
@@ -186,7 +186,7 @@ const validateAndFixImagePath = (imagePath, fallbackData = {}) => {
 
             if (matchingFile) {
               const recoveredPath = path.join(folderPath, matchingFile);
-              console.log(`✅ Ruta recuperada (vacío): ${recoveredPath}`);
+              // console.log(`✅ Ruta recuperada (vacío): ${recoveredPath}`);
               return recoveredPath;
             }
           }
@@ -211,7 +211,7 @@ const validateAndFixImagePath = (imagePath, fallbackData = {}) => {
   const isCorrupt = corruptionPatterns.some(pattern => pattern.test(imagePath.trim()));
   
   if (isCorrupt) {
-    console.warn(`⚠️ Detectada ruta de imagen corrupta: "${imagePath}"`);
+    // console.warn(`⚠️ Detectada ruta de imagen corrupta: "${imagePath}"`);
     
     // Si hay datos de fallback y la ruta corrupta parece ser una fecha
     // intentar buscar la imagen en el sistema de archivos
@@ -236,7 +236,7 @@ const validateAndFixImagePath = (imagePath, fallbackData = {}) => {
             
             if (matchingFile) {
               const recoveredPath = path.join(folderPath, matchingFile);
-              console.log(`✅ Ruta recuperada: ${recoveredPath}`);
+              // console.log(`✅ Ruta recuperada: ${recoveredPath}`);
               return recoveredPath;
             }
           }
@@ -261,7 +261,7 @@ const validateRecordFields = (data) => {
 
   const requireText = (key, fallback = '') => {
     if (!sanitized[key] || String(sanitized[key]).trim() === '') {
-      console.warn(`⚠️ Campo faltante: ${key}`);
+      // console.warn(`⚠️ Campo faltante: ${key}`);
       sanitized[key] = fallback;
     }
   };
@@ -271,7 +271,7 @@ const validateRecordFields = (data) => {
     if (v && /^\d{4}-\d{2}-\d{2}$/.test(String(v).trim())) {
       sanitized[key] = String(v).trim();
     } else {
-      console.warn(`⚠️ Fecha inválida en ${key}: ${v}`);
+      // console.warn(`⚠️ Fecha inválida en ${key}: ${v}`);
       sanitized[key] = '';
     }
   };
@@ -285,7 +285,7 @@ const validateRecordFields = (data) => {
       sanitized.latitud = parseFloat(lat);
       sanitized.longitud = parseFloat(lng);
     } else {
-      console.warn(`⚠️ Coordenadas inválidas: ${v}`);
+      // console.warn(`⚠️ Coordenadas inválidas: ${v}`);
       sanitized.latitud = '';
       sanitized.longitud = '';
     }
@@ -325,10 +325,10 @@ const updateCSVLine = async (lineIndex, data) => {
     const img3 = safe.imagenes && safe.imagenes.length > 2 ? 
       validateAndFixImagePath(safe.imagenes[2], { id: safe.id, marca: safe.marca, campana: safe.campana }) : '';
     
-    console.log('📸 Rutas de imagen validadas:');
-    console.log('  Img1:', img1 || '(vacío)');
-    console.log('  Img2:', img2 || '(vacío)');
-    console.log('  Img3:', img3 || '(vacío)');
+    // console.log('📸 Rutas de imagen validadas:');
+    // console.log('  Img1:', img1 || '(vacío)');
+    // console.log('  Img2:', img2 || '(vacío)');
+    // console.log('  Img3:', img3 || '(vacío)');
     
     const row = [
       csvEscape(safe.id),
@@ -352,7 +352,7 @@ const updateCSVLine = async (lineIndex, data) => {
     
     lines[lineIndex] = row;
     await fs.promises.writeFile(CSV_FILE, lines.join('\n'), 'utf8');
-    console.log(`CSV actualizado en línea ${lineIndex}`);
+    // console.log(`CSV actualizado en línea ${lineIndex}`);
   } catch (error) {
     console.error('Error al actualizar CSV:', error);
     throw error;
@@ -361,19 +361,19 @@ const updateCSVLine = async (lineIndex, data) => {
 
 const getAllFromCSV = async () => {
   try {
-    console.log('📂 Iniciando getAllFromCSV...');
+    // console.log('📂 Iniciando getAllFromCSV...');
     await ensureHeader();
     
     if (!fs.existsSync(CSV_FILE)) {
-      console.warn('⚠️ Archivo CSV no existe en:', CSV_FILE);
+      // console.warn('⚠️ Archivo CSV no existe en:', CSV_FILE);
       return [];
     }
 
-    console.log('✅ Archivo CSV encontrado:', CSV_FILE);
+    // console.log('✅ Archivo CSV encontrado:', CSV_FILE);
     const content = await fs.promises.readFile(CSV_FILE, 'utf8');
     const lines = content.split('\n');
     
-    console.log(`📋 Total líneas en CSV: ${lines.length}`);
+    // console.log(`📋 Total líneas en CSV: ${lines.length}`);
 
     const data = [];
     for (let i = 1; i < lines.length; i++) {
@@ -382,7 +382,7 @@ const getAllFromCSV = async () => {
       
       // Parsear CSV con punto y coma
       const values = line.split(';');
-      console.log(`📝 Línea ${i}:`, values);
+      // console.log(`📝 Línea ${i}:`, values);
       
       // Soporta esquema nuevo (17 columnas) y antiguo (16 columnas sin Tipo_OOH)
       const isNewSchema = values.length >= 17;
@@ -424,7 +424,7 @@ const getAllFromCSV = async () => {
       ]);
     }
 
-    console.log(`📊 Total registros encontrados en CSV: ${data.length}`);
+    // console.log(`📊 Total registros encontrados en CSV: ${data.length}`);
     return data;
   } catch (error) {
     console.error('❌ Error al leer CSV:', error);

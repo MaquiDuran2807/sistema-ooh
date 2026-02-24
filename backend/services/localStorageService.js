@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
 // Crear carpeta de imágenes locales si no existe
@@ -43,42 +44,37 @@ const sanitizeFilename = (str) => {
  */
 const uploadToLocal = async (files, metadata = {}) => {
   try {
-    const uploadPromises = files.map((file, index) => {
-      return new Promise((resolve, reject) => {
-        let filename;
-        let targetDir = imagesDir;
-        
-        if (metadata.id && metadata.marca) {
-          const ext = path.extname(file.originalname) || '.jpg';
-          const marcaClean = sanitizeFilename(metadata.marca);
-          const hash = crypto.createHash('md5').update(file.buffer).digest('hex');
-          
-          // Crear estructura de carpetas simple: marca/
-          targetDir = path.join(imagesDir, marcaClean);
-          if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
-          }
-          
-          // Nombre de archivo: id_hash.ext (hash del contenido para evitar colisiones)
-          filename = `${metadata.id}_${hash}${ext}`;
-        } else {
-          filename = `${Date.now()}-${uuidv4()}-${file.originalname}`;
-        }
-        
-        const filepath = path.join(targetDir, filename);
+    const uploadPromises = files.map(async (file, index) => {
+      let filename;
+      let targetDir = imagesDir;
 
-        fs.writeFile(filepath, file.buffer, (err) => {
-          if (err) {
-            console.error(`Error al guardar ${file.originalname}:`, err);
-            reject(new Error('Error al guardar imagen'));
-          } else {
-            // Retornar ruta local absoluta (no URL de API)
-            const absolutePath = path.normalize(filepath);
-            console.log(`Imagen guardada localmente: ${absolutePath}`);
-            resolve(absolutePath);
-          }
-        });
-      });
+      const pngBuffer = await sharp(file.buffer)
+        .png({ compressionLevel: 9, adaptiveFiltering: true })
+        .toBuffer();
+
+      if (metadata.id && metadata.marca) {
+        const marcaClean = sanitizeFilename(metadata.marca);
+        const hash = crypto.createHash('md5').update(pngBuffer).digest('hex');
+        const timestamp = Date.now(); // Timestamp para evitar caché
+
+        // Crear estructura de carpetas simple: marca/
+        targetDir = path.join(imagesDir, marcaClean);
+        if (!fs.existsSync(targetDir)) {
+          fs.mkdirSync(targetDir, { recursive: true });
+        }
+
+        // Nombre de archivo: id_hash_timestamp.png (con timestamp para nuevas versiones)
+        filename = `${metadata.id}_${hash}_${timestamp}.png`;
+      } else {
+        filename = `${Date.now()}-${uuidv4()}.png`;
+      }
+
+      const filepath = path.join(targetDir, filename);
+
+      await fs.promises.writeFile(filepath, pngBuffer);
+      const absolutePath = path.normalize(filepath);
+      // console.log(`Imagen guardada localmente: ${absolutePath}`);
+      return absolutePath;
     });
 
     return await Promise.all(uploadPromises);
@@ -126,13 +122,13 @@ const deleteFromLocal = async (imageUrl) => {
 
     // Seguridad: asegurar que la ruta está dentro de imagesDir
     if (!filepath.startsWith(imagesDir)) {
-      console.warn('Intento de eliminar archivo fuera de imagesDir');
+      // console.warn('Intento de eliminar archivo fuera de imagesDir');
       return;
     }
 
     if (fs.existsSync(filepath)) {
       fs.unlinkSync(filepath);
-      console.log(`Archivo eliminado: ${filename}`);
+      // console.log(`Archivo eliminado: ${filename}`);
     }
   } catch (error) {
     console.error('Error al eliminar archivo local:', error);

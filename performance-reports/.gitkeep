@@ -1,0 +1,8 @@
+# Performance Reports Directory
+
+This directory will contain:
+- k6 test results (JSON)
+- Docker stats (JSON and CSV)
+- Final performance reports (Markdown)
+
+Files are generated automatically by the performance testing scripts.

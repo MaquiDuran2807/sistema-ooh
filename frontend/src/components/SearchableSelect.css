@@ -1,0 +1,120 @@
+.searchable-select-container {
+  position: relative;
+  width: 100%;
+}
+
+.searchable-select-container label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.searchable-select-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchable-select-input {
+  width: 100%;
+  padding: 10px 32px 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: #fff;
+  transition: all 0.2s ease;
+}
+
+.searchable-select-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+  background-color: #fafafa;
+}
+
+.searchable-select-input::placeholder {
+  color: #999;
+}
+
+.searchable-select-arrow {
+  position: absolute;
+  right: 10px;
+  font-size: 12px;
+  color: #666;
+  pointer-events: none;
+  transition: transform 0.2s ease;
+}
+
+.searchable-select-arrow.open {
+  transform: rotate(180deg);
+}
+
+.searchable-select-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0 0;
+  padding: 4px 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #fff;
+  list-style: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.searchable-select-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  color: #333;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+.searchable-select-item:hover {
+  background-color: #f0f0f0;
+}
+
+.searchable-select-item.selected {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.searchable-select-item.selected::before {
+  content: '✓ ';
+  margin-right: 6px;
+  color: #4CAF50;
+}
+
+.searchable-select-no-results {
+  padding: 10px 12px;
+  color: #999;
+  font-size: 14px;
+  text-align: center;
+  cursor: default;
+}
+
+/* Scroll personalizado */
+.searchable-select-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.searchable-select-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.searchable-select-list::-webkit-scrollbar-thumb {
+  background: #ddd;
+  border-radius: 3px;
+}
+
+.searchable-select-list::-webkit-scrollbar-thumb:hover {
+  background: #ccc;
+}

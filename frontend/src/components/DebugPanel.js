@@ -11,11 +11,26 @@ const DebugPanel = () => {
   const getContextInfo = () => {
     return {
       brands: appContext.brands || [],
+      campaigns: appContext.campaigns || [],
+      categories: appContext.categories || [],
+      advertisers: appContext.advertisers || [],
       oohTypes: appContext.oohTypes || [],
+      cities: appContext.cities || [],
+      addresses: appContext.addresses || [],
+      providers: appContext.providers || [],
+      regions: appContext.regions || [],
       records: appContext.records || [],
       loading: appContext.loading,
+      initialized: appContext.initialized,
       brandsCount: appContext.brands?.length || 0,
+      campaignsCount: appContext.campaigns?.length || 0,
+      categoriesCount: appContext.categories?.length || 0,
+      advertisersCount: appContext.advertisers?.length || 0,
       oohTypesCount: appContext.oohTypes?.length || 0,
+      citiesCount: appContext.cities?.length || 0,
+      addressesCount: appContext.addresses?.length || 0,
+      providersCount: appContext.providers?.length || 0,
+      regionsCount: appContext.regions?.length || 0,
       recordsCount: appContext.records?.length || 0,
     };
   };
@@ -84,9 +99,17 @@ const DebugPanel = () => {
             <h4>AppContext</h4>
             <div className="debug-summary">
               <p>📦 Brands: {getContextInfo().brandsCount}</p>
-              <p>📋 OOH Types: {getContextInfo().oohTypesCount}</p>
-              <p>📍 Records: {getContextInfo().recordsCount}</p>
+              <p>📋 Campaigns: {getContextInfo().campaignsCount}</p>
+              <p>🏷️ Categories: {getContextInfo().categoriesCount}</p>
+              <p>🏢 Advertisers: {getContextInfo().advertisersCount}</p>
+              <p>🚀 OOH Types: {getContextInfo().oohTypesCount}</p>
+              <p>🏙️ Cities: {getContextInfo().citiesCount}</p>
+              <p>📍 Addresses: {getContextInfo().addressesCount}</p>
+              <p>🏭 Providers: {getContextInfo().providersCount}</p>
+              <p>🗺️ Regions: {getContextInfo().regionsCount}</p>
+              <p>📊 Records: {getContextInfo().recordsCount}</p>
               <p>⏳ Loading: {String(getContextInfo().loading)}</p>
+              <p>✅ Initialized: {String(getContextInfo().initialized)}</p>
             </div>
             <details>
               <summary>Ver detalles completos</summary>

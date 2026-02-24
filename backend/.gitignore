@@ -1,7 +1,19 @@
 node_modules/
 .env
 .env.local
+.env.production
 ooh_data.xlsx
 *.xlsx
 dist/
 build/
+
+# Credenciales de GCP - NUNCA subir estos archivos
+config/
+*-key.json
+service-account*.json
+*.pem
+
+# Bases de datos locales
+*.db
+*.sqlite
+ooh_data.db
